@@ -68,6 +68,9 @@ def run(argv: list[str] | None = None) -> int:
         for drive in drives:
             drive_id = drive["id"]
             drive_name = drive.get("name", drive_id)
+            watermark_path = config.library_watermark_paths.get(
+                drive_name.lower(), config.watermark_image_path
+            )
             LOG.info("Scanning library: %s", drive_name)
             try:
                 items = graph.iter_files(drive_id)
@@ -92,7 +95,7 @@ def run(argv: list[str] | None = None) -> int:
                 try:
                     file_bytes = graph.download_file(drive_id, item_id)
                     source_path.write_bytes(file_bytes)
-                    apply_watermark(source_path, output_path, config.watermark_image_path)
+                    apply_watermark(source_path, output_path, watermark_path)
                     if not args.dry_run:
                         graph.upload_file(drive_id, item_id, output_path.read_bytes())
                     processed += 1

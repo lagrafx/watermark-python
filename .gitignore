@@ -5,4 +5,4 @@ __pycache__/
 .idea/
 .vscode/
 .env
-.watermark_state.json
+.watermark_state*.json

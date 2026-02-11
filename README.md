@@ -35,11 +35,25 @@ Environment variables:
 - `AZURE_TENANT_ID`
 - `AZURE_CLIENT_ID`
 - `AZURE_CLIENT_SECRET`
+- `CLOUD_ENV` (optional; `commercial` default, or `gcch`)
 - `SP_SITE_HOSTNAME` (example: `contoso.sharepoint.com`)
 - `SP_SITE_PATH` (example: `/sites/Finance`)
 - `SP_LIBRARY_NAMES` (optional, comma-separated library names; blank = all)
+- `SP_LIBRARY_WATERMARKS` (optional, `Library=path;Other Library=path` mapping)
 - `WATERMARK_IMAGE_PATH` (local PNG path)
 - `STATE_FILE` (optional; default `.watermark_state.json`)
+
+`WATERMARK_IMAGE_PATH` remains the default watermark for any library not listed in
+`SP_LIBRARY_WATERMARKS`.
+
+Example:
+
+`SP_LIBRARY_WATERMARKS=Documents=C:\Projects\watermark python\classified_watermark.png;Legal Docs=C:\Projects\watermark python\legal_watermark.png`
+
+For GCC High, set:
+
+- `CLOUD_ENV=gcch`
+- `SP_SITE_HOSTNAME` typically ends with `.sharepoint.us`
 
 ## Run
 
