@@ -22,11 +22,38 @@ Scheduled SharePoint watermark automation for new Word/Excel documents.
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -e .
 pip install pytest
 ```
 
 Create `.env` from `.env.example` and fill in your values.
+
+## Deploy On A Server
+
+1. Place the repo in a fixed folder, for example: `C:\Apps\watermark-python`
+2. Open PowerShell in that folder.
+3. Create and install the runtime environment:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -e .
+```
+
+4. Create `C:\Apps\watermark-python\.env` from `.env.example` and set real values.
+5. Run a verification test:
+
+```powershell
+.\.venv\Scripts\python.exe -m watermark_app --dry-run --log-level INFO
+```
+
+6. Run a real test:
+
+```powershell
+.\.venv\Scripts\python.exe -m watermark_app --log-level INFO
+```
 
 ## Configuration
 
@@ -69,17 +96,35 @@ python -m watermark_app --dry-run --log-level DEBUG
 
 ## Schedule (Windows Task Scheduler)
 
-Program/script:
+Use **Task Scheduler -> Create Task** (not Basic Task).
 
-`C:\Projects\watermark python\.venv\Scripts\python.exe`
+General:
 
-Add arguments:
+- Run whether user is logged on or not.
+- Use a service account that has access to local files and network.
 
-`-m watermark_app --log-level INFO`
+Trigger:
 
-Start in:
+- Set your desired schedule (daily/hourly/etc.).
 
-`C:\Projects\watermark python`
+Action:
+
+- Program/script:
+  `C:\Apps\watermark-python\.venv\Scripts\python.exe`
+- Add arguments:
+  `-m watermark_app --log-level INFO`
+- Start in:
+  `C:\Apps\watermark-python`
+
+Optional log file output:
+
+- Add arguments:
+  `-m watermark_app --log-level INFO >> C:\Apps\watermark-python\logs\watermark.log 2>&1`
+
+Dependency note:
+
+- `Pillow` and other required packages are already included in project dependencies.
+- Installing with `pip install -e .` installs everything needed; no separate manual install is required.
 
 ## Test
 
