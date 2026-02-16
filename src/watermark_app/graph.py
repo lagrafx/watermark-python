@@ -91,8 +91,18 @@ class GraphClient:
     def _raise_for_error(response: requests.Response, operation: str) -> None:
         if response.ok:
             return
+        detail = None
         try:
             detail = response.json()
         except Exception:  # noqa: BLE001
             detail = response.text
-        raise GraphClientError(f"Failed to {operation}: HTTP {response.status_code} {detail}")
+        hint = ""
+        if response.status_code == 403:
+            hint = (
+                " Hint: Access denied. If using Graph Application permission "
+                "'Sites.Selected', grant this app site-level permission to the target "
+                "SharePoint site (for example, write access)."
+            )
+        raise GraphClientError(
+            f"Failed to {operation}: HTTP {response.status_code} {detail}{hint}"
+        )
