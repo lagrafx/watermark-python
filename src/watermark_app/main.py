@@ -60,6 +60,18 @@ def run(argv: list[str] | None = None) -> int:
     if library_filter:
         drives = [d for d in drives if d.get("name", "").lower() in library_filter]
 
+    missing_mappings = [
+        d.get("name", d["id"])
+        for d in drives
+        if d.get("name", "").lower() not in config.library_watermark_paths
+    ]
+    if missing_mappings:
+        LOG.error(
+            "Missing SP_LIBRARY_WATERMARKS entries for targeted libraries: %s",
+            ", ".join(missing_mappings),
+        )
+        return 2
+
     processed = 0
     failed = 0
     skipped = 0
@@ -69,9 +81,7 @@ def run(argv: list[str] | None = None) -> int:
         for drive in drives:
             drive_id = drive["id"]
             drive_name = drive.get("name", drive_id)
-            watermark_path = config.library_watermark_paths.get(
-                drive_name.lower(), config.watermark_image_path
-            )
+            watermark_path = config.library_watermark_paths[drive_name.lower()]
             LOG.info("Scanning library: %s", drive_name)
             try:
                 items = graph.iter_files(drive_id)

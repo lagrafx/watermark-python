@@ -81,7 +81,6 @@ class AppConfig:
     graph_scope: str
     site_hostname: str
     site_path: str
-    watermark_image_path: Path
     library_watermark_paths: dict[str, Path]
     state_file: Path
     library_names: tuple[str, ...]
@@ -109,10 +108,6 @@ class AppConfig:
                 "Missing app credential. Set AZURE_CLIENT_SECRET or AZURE_CLIENT_CERT_PFX_PATH."
             )
 
-        watermark_path = Path(_required_env("WATERMARK_IMAGE_PATH")).expanduser().resolve()
-        if not watermark_path.exists():
-            raise ValueError(f"Watermark image not found: {watermark_path}")
-
         libraries_csv = os.getenv("SP_LIBRARY_NAMES", "").strip()
         library_names = tuple(
             part.strip() for part in libraries_csv.split(",") if part.strip()
@@ -120,6 +115,11 @@ class AppConfig:
         library_watermark_paths = _parse_library_watermarks(
             os.getenv("SP_LIBRARY_WATERMARKS", "")
         )
+        if not library_watermark_paths:
+            raise ValueError(
+                "SP_LIBRARY_WATERMARKS is required and must map each target library "
+                "to a watermark PNG."
+            )
         state_file = Path(os.getenv("STATE_FILE", ".watermark_state.json")).expanduser().resolve()
 
         return cls(
@@ -135,7 +135,6 @@ class AppConfig:
             graph_scope=graph_scope,
             site_hostname=_required_env("SP_SITE_HOSTNAME"),
             site_path=_required_env("SP_SITE_PATH"),
-            watermark_image_path=watermark_path,
             library_watermark_paths=library_watermark_paths,
             state_file=state_file,
             library_names=library_names,

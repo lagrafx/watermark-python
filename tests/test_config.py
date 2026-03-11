@@ -13,8 +13,8 @@ def _set_base_env(monkeypatch: pytest.MonkeyPatch, watermark_file: Path) -> None
     monkeypatch.delenv("AZURE_CLIENT_CERT_PFX_PASSWORD", raising=False)
     monkeypatch.setenv("SP_SITE_HOSTNAME", "contoso.sharepoint.com")
     monkeypatch.setenv("SP_SITE_PATH", "/sites/Finance")
-    monkeypatch.setenv("WATERMARK_IMAGE_PATH", str(watermark_file))
-    monkeypatch.setenv("SP_LIBRARY_WATERMARKS", "")
+    monkeypatch.setenv("SP_LIBRARY_NAMES", "Documents")
+    monkeypatch.setenv("SP_LIBRARY_WATERMARKS", f"Documents={watermark_file}")
     monkeypatch.delenv("CLOUD_ENV", raising=False)
 
 
@@ -90,13 +90,11 @@ def test_from_env_requires_secret_or_cert(tmp_path: Path, monkeypatch: pytest.Mo
 def test_from_env_library_watermark_map(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    default_wm = tmp_path / "default.png"
     docs_wm = tmp_path / "docs.png"
     legal_wm = tmp_path / "legal.png"
-    default_wm.write_bytes(b"default")
     docs_wm.write_bytes(b"docs")
     legal_wm.write_bytes(b"legal")
-    _set_base_env(monkeypatch, default_wm)
+    _set_base_env(monkeypatch, docs_wm)
     monkeypatch.setenv(
         "SP_LIBRARY_WATERMARKS",
         f"Documents={docs_wm};Legal Docs={legal_wm}",
@@ -111,10 +109,22 @@ def test_from_env_library_watermark_map(
 def test_from_env_rejects_invalid_library_watermark_map(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    default_wm = tmp_path / "default.png"
-    default_wm.write_bytes(b"default")
-    _set_base_env(monkeypatch, default_wm)
+    docs_wm = tmp_path / "docs.png"
+    docs_wm.write_bytes(b"docs")
+    _set_base_env(monkeypatch, docs_wm)
     monkeypatch.setenv("SP_LIBRARY_WATERMARKS", "Documents")
 
     with pytest.raises(ValueError, match="Invalid SP_LIBRARY_WATERMARKS entry"):
+        AppConfig.from_env()
+
+
+def test_from_env_requires_library_watermark_mapping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    docs_wm = tmp_path / "docs.png"
+    docs_wm.write_bytes(b"docs")
+    _set_base_env(monkeypatch, docs_wm)
+    monkeypatch.setenv("SP_LIBRARY_WATERMARKS", "")
+
+    with pytest.raises(ValueError, match="SP_LIBRARY_WATERMARKS is required"):
         AppConfig.from_env()
