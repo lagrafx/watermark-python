@@ -61,7 +61,9 @@ Environment variables:
 
 - `AZURE_TENANT_ID`
 - `AZURE_CLIENT_ID`
-- `AZURE_CLIENT_SECRET`
+- `AZURE_CLIENT_SECRET` (required for client secret auth)
+- `AZURE_CLIENT_CERT_PFX_PATH` (required for certificate auth)
+- `AZURE_CLIENT_CERT_PFX_PASSWORD` (optional; required only if the PFX is password protected)
 - `CLOUD_ENV` (optional; `commercial` default, or `gcch`)
 - `SP_SITE_HOSTNAME` (example: `contoso.sharepoint.com`)
 - `SP_SITE_PATH` (example: `/sites/Finance`)
@@ -81,6 +83,13 @@ For GCC High, set:
 
 - `CLOUD_ENV=gcch`
 - `SP_SITE_HOSTNAME` typically ends with `.sharepoint.us`
+
+Authentication mode:
+
+- Set `AZURE_CLIENT_SECRET` to use client secret authentication.
+- Set `AZURE_CLIENT_CERT_PFX_PATH` (and optional `AZURE_CLIENT_CERT_PFX_PASSWORD`) to use
+  certificate authentication from a PFX file.
+- If both are set, certificate authentication is used.
 
 ## Run
 

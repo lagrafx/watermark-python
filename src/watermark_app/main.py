@@ -45,6 +45,7 @@ def run(argv: list[str] | None = None) -> int:
     config = AppConfig.from_env()
     state = load_state(config.state_file)
     LOG.info("Starting run (dry_run=%s)", args.dry_run)
+    LOG.info("Authentication mode: %s", config.auth_mode)
     LOG.info("Last successful run: %s", state.last_successful_run_utc or "none")
 
     try:

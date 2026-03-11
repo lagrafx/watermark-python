@@ -20,9 +20,23 @@ class GraphClient:
 
     def __post_init__(self) -> None:
         authority = f"{self.config.authority_host}/{self.config.tenant_id}"
+        client_credential: str | dict[str, str]
+        if self.config.auth_mode == "certificate":
+            if not self.config.client_cert_pfx_path:
+                raise GraphClientError("Certificate auth selected but no PFX path was configured.")
+            client_credential = {
+                "private_key_pfx_path": str(self.config.client_cert_pfx_path),
+            }
+            if self.config.client_cert_pfx_password:
+                client_credential["passphrase"] = self.config.client_cert_pfx_password
+        else:
+            if not self.config.client_secret:
+                raise GraphClientError("Client secret auth selected but AZURE_CLIENT_SECRET is empty.")
+            client_credential = self.config.client_secret
+
         self._msal_app = msal.ConfidentialClientApplication(
             client_id=self.config.client_id,
-            client_credential=self.config.client_secret,
+            client_credential=client_credential,
             authority=authority,
         )
         token_result = self._msal_app.acquire_token_for_client(scopes=[self.config.graph_scope])

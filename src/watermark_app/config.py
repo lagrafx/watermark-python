@@ -71,7 +71,10 @@ def _parse_library_watermarks(raw: str) -> dict[str, Path]:
 class AppConfig:
     tenant_id: str
     client_id: str
-    client_secret: str
+    auth_mode: str
+    client_secret: str | None
+    client_cert_pfx_path: Path | None
+    client_cert_pfx_password: str | None
     cloud_env: str
     authority_host: str
     graph_base_url: str
@@ -89,6 +92,23 @@ class AppConfig:
         cloud_env, authority_host, graph_base_url, graph_scope = _resolve_cloud_env(
             os.getenv("CLOUD_ENV", "")
         )
+        client_secret = os.getenv("AZURE_CLIENT_SECRET", "").strip() or None
+        client_cert_pfx_raw = os.getenv("AZURE_CLIENT_CERT_PFX_PATH", "").strip()
+        client_cert_pfx_password = os.getenv("AZURE_CLIENT_CERT_PFX_PASSWORD", "") or None
+        client_cert_pfx_path = (
+            Path(client_cert_pfx_raw).expanduser().resolve() if client_cert_pfx_raw else None
+        )
+        if client_cert_pfx_path and not client_cert_pfx_path.exists():
+            raise ValueError(f"Client certificate PFX not found: {client_cert_pfx_path}")
+        if client_cert_pfx_path:
+            auth_mode = "certificate"
+        elif client_secret:
+            auth_mode = "client_secret"
+        else:
+            raise ValueError(
+                "Missing app credential. Set AZURE_CLIENT_SECRET or AZURE_CLIENT_CERT_PFX_PATH."
+            )
+
         watermark_path = Path(_required_env("WATERMARK_IMAGE_PATH")).expanduser().resolve()
         if not watermark_path.exists():
             raise ValueError(f"Watermark image not found: {watermark_path}")
@@ -105,7 +125,10 @@ class AppConfig:
         return cls(
             tenant_id=_required_env("AZURE_TENANT_ID"),
             client_id=_required_env("AZURE_CLIENT_ID"),
-            client_secret=_required_env("AZURE_CLIENT_SECRET"),
+            auth_mode=auth_mode,
+            client_secret=client_secret,
+            client_cert_pfx_path=client_cert_pfx_path,
+            client_cert_pfx_password=client_cert_pfx_password,
             cloud_env=cloud_env,
             authority_host=authority_host,
             graph_base_url=graph_base_url,
