@@ -31,7 +31,9 @@ class GraphClient:
                 client_credential["passphrase"] = self.config.client_cert_pfx_password
         else:
             if not self.config.client_secret:
-                raise GraphClientError("Client secret auth selected but AZURE_CLIENT_SECRET is empty.")
+                raise GraphClientError(
+                    "Client secret auth selected but AZURE_CLIENT_SECRET is empty."
+                )
             client_credential = self.config.client_secret
 
         self._msal_app = msal.ConfidentialClientApplication(

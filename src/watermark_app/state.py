@@ -24,7 +24,9 @@ def load_state(path: Path) -> RunState:
     if not path.exists():
         return RunState()
     data = json.loads(path.read_text(encoding="utf-8"))
-    return RunState(last_successful_run_utc=_parse_iso_datetime(data.get("last_successful_run_utc")))
+    return RunState(
+        last_successful_run_utc=_parse_iso_datetime(data.get("last_successful_run_utc"))
+    )
 
 
 def save_state(path: Path, run_started_utc: datetime) -> None:

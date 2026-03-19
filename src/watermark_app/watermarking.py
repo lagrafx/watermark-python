@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 SUPPORTED_EXTENSIONS = {".docx", ".docm", ".xlsx", ".xlsm"}
 
 

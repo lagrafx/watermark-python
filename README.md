@@ -13,7 +13,7 @@ Scheduled SharePoint watermark automation for new Word/Excel documents.
 
 ## Prerequisites
 
-- Python 3.13+
+- Python 3.10+
 - Azure App Registration with Graph application permissions to SharePoint files.
 - Admin consent granted for the app permissions.
 
@@ -163,4 +163,10 @@ On VM:
 
 ```powershell
 pytest
+```
+
+Lint:
+
+```powershell
+ruff check src tests
 ```

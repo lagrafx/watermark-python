@@ -1,9 +1,14 @@
-from watermark_app.graph import GraphClientError
-from watermark_app.graph import GraphClient
+from watermark_app.graph import GraphClient, GraphClientError
 
 
 class _DummyResponse:
-    def __init__(self, ok: bool, status_code: int, payload: dict | None = None, text: str = "") -> None:
+    def __init__(
+        self,
+        ok: bool,
+        status_code: int,
+        payload: dict | None = None,
+        text: str = "",
+    ) -> None:
         self.ok = ok
         self.status_code = status_code
         self._payload = payload

@@ -119,7 +119,12 @@ def run(argv: list[str] | None = None) -> int:
         LOG.info("Run successful. Processed=%s skipped=%s failed=%s", processed, skipped, failed)
         return 0
 
-    LOG.error("Run completed with errors. Processed=%s skipped=%s failed=%s", processed, skipped, failed)
+    LOG.error(
+        "Run completed with errors. Processed=%s skipped=%s failed=%s",
+        processed,
+        skipped,
+        failed,
+    )
     return 1
 
 
