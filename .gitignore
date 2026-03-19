@@ -1,8 +1,15 @@
 __pycache__/
 *.py[cod]
 .venv/
+.packenv/
+.buildenv/
+.dlvenv/
 .pytest_cache/
 .idea/
 .vscode/
 .env
 .watermark_state*.json
+build/
+dist/
+*.spec
+run_watermark.py

@@ -136,6 +136,29 @@ Dependency note:
 - `Pillow` and other required packages are already included in project dependencies.
 - Installing with `pip install -e .` installs everything needed; no separate manual install is required.
 
+## Portable EXE Bundle (No Python Install On VM)
+
+If the target VM cannot install Python or run pip against the internet, build a portable bundle on another machine:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-portable.ps1
+```
+
+This produces a timestamped folder and zip in `C:\Projects` containing:
+
+- `watermark-app.exe`
+- `_internal\` runtime payload
+- `.env.example`
+- watermark PNG assets
+- `RUN_ME_FIRST.txt`
+
+On VM:
+
+1. Unzip to `C:\Apps\watermark-app`
+2. Copy `.env.example` to `.env` and fill values
+3. Run:
+   `.\watermark-app.exe --dry-run --log-level INFO`
+
 ## Test
 
 ```powershell
