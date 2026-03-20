@@ -13,3 +13,4 @@ build/
 dist/
 *.spec
 run_watermark.py
+*.egg-info/
