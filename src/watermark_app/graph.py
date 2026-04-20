@@ -41,7 +41,8 @@ class GraphClient:
             client_credential=client_credential,
             authority=authority,
         )
-        token_result = self._msal_app.acquire_token_for_client(scopes=[self.config.graph_scope])
+        self._scope = [self.config.graph_scope]
+        token_result = self._acquire_access_token()
         token = token_result.get("access_token")
         if not token:
             raise GraphClientError(f"Failed to acquire access token: {token_result}")
@@ -52,14 +53,15 @@ class GraphClient:
         if not site_path.startswith("/"):
             site_path = "/" + site_path
         url = f"{self.config.graph_base_url}/sites/{self.config.site_hostname}:{site_path}"
-        response = requests.get(url, headers=self._headers, timeout=60)
+        response = self._request("GET", url, operation="resolve site", timeout=60)
         self._raise_for_error(response, "resolve site")
         return response.json()["id"]
 
     def list_drives(self, site_id: str) -> list[dict]:
-        response = requests.get(
+        response = self._request(
+            "GET",
             f"{self.config.graph_base_url}/sites/{site_id}/drives",
-            headers=self._headers,
+            operation="list drives",
             timeout=60,
         )
         self._raise_for_error(response, "list drives")
@@ -70,7 +72,7 @@ class GraphClient:
         queue: list[str] = [f"{self.config.graph_base_url}/drives/{drive_id}/root/children"]
         while queue:
             url = queue.pop(0)
-            response = requests.get(url, headers=self._headers, timeout=60)
+            response = self._request("GET", url, operation="list drive items", timeout=60)
             self._raise_for_error(response, "list drive items")
             payload = response.json()
             for item in payload.get("value", []):
@@ -86,22 +88,72 @@ class GraphClient:
         return files
 
     def download_file(self, drive_id: str, item_id: str) -> bytes:
-        response = requests.get(
+        response = self._request(
+            "GET",
             f"{self.config.graph_base_url}/drives/{drive_id}/items/{item_id}/content",
-            headers=self._headers,
+            operation="download file",
             timeout=120,
         )
         self._raise_for_error(response, "download file")
         return response.content
 
     def upload_file(self, drive_id: str, item_id: str, data: bytes) -> None:
-        response = requests.put(
+        response = self._request(
+            "PUT",
             f"{self.config.graph_base_url}/drives/{drive_id}/items/{item_id}/content",
-            headers={**self._headers, "Content-Type": "application/octet-stream"},
+            operation="upload file",
+            headers={"Content-Type": "application/octet-stream"},
             data=data,
             timeout=120,
         )
         self._raise_for_error(response, "upload file")
+
+    def _request(
+        self,
+        method: str,
+        url: str,
+        operation: str,
+        timeout: int,
+        headers: dict[str, str] | None = None,
+        **kwargs: object,
+    ) -> requests.Response:
+        response = requests.request(
+            method=method,
+            url=url,
+            headers={**self._headers, **(headers or {})},
+            timeout=timeout,
+            **kwargs,
+        )
+        if response.status_code == 401 and self._is_invalid_token_error(response):
+            token_result = self._acquire_access_token()
+            token = token_result.get("access_token")
+            if not token:
+                raise GraphClientError(f"Failed to refresh access token: {token_result}")
+            self._headers = {"Authorization": f"Bearer {token}"}
+            response = requests.request(
+                method=method,
+                url=url,
+                headers={**self._headers, **(headers or {})},
+                timeout=timeout,
+                **kwargs,
+            )
+        return response
+
+    def _acquire_access_token(self) -> dict:
+        return self._msal_app.acquire_token_for_client(scopes=self._scope)
+
+    @staticmethod
+    def _is_invalid_token_error(response: requests.Response) -> bool:
+        try:
+            payload = response.json()
+        except Exception:  # noqa: BLE001
+            return False
+        if not isinstance(payload, dict):
+            return False
+        error = payload.get("error")
+        if not isinstance(error, dict):
+            return False
+        return error.get("code") == "InvalidAuthenticationToken"
 
     @staticmethod
     def _raise_for_error(response: requests.Response, operation: str) -> None:
