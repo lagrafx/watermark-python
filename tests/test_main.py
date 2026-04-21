@@ -16,13 +16,14 @@ def test_supported_extensions() -> None:
 
 
 def test_should_process_with_no_state() -> None:
-    assert should_process("2026-02-07T00:00:00Z", None)
+    assert should_process("id-1", "2026-02-07T00:00:00Z", None, frozenset())
 
 
 def test_should_process_with_state() -> None:
     last_run = datetime(2026, 2, 7, 0, 0, tzinfo=timezone.utc)
-    assert should_process("2026-02-07T00:01:00Z", last_run)
-    assert not should_process("2026-02-06T23:59:00Z", last_run)
+    assert should_process("id-1", "2026-02-07T00:01:00Z", last_run, frozenset())
+    assert not should_process("id-1", "2026-02-06T23:59:00Z", last_run, frozenset())
+    assert not should_process("id-1", "2026-02-08T00:00:00Z", last_run, frozenset({"id-1"}))
 
 
 def test_run_dry_run_does_not_save_state(monkeypatch, tmp_path: Path) -> None:
@@ -52,11 +53,11 @@ def test_run_dry_run_does_not_save_state(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
     monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
-    monkeypatch.setattr(main_module, "load_state", lambda _path: RunState(None))
+    monkeypatch.setattr(main_module, "load_state", lambda _path: RunState(None, frozenset()))
     monkeypatch.setattr(
         main_module,
         "save_state",
-        lambda _path, _run_started: state_saved.__setitem__("called", True),
+        lambda _path, _run_started, _ids: state_saved.__setitem__("called", True),
     )
 
     rc = main_module.run(["--dry-run", "--log-level", "INFO"])
@@ -92,14 +93,75 @@ def test_run_non_dry_run_saves_state(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
     monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
-    monkeypatch.setattr(main_module, "load_state", lambda _path: RunState(None))
+    monkeypatch.setattr(main_module, "load_state", lambda _path: RunState(None, frozenset()))
     monkeypatch.setattr(
         main_module,
         "save_state",
-        lambda _path, _run_started: state_saved.__setitem__("called", True),
+        lambda _path, _run_started, _ids: state_saved.__setitem__("called", True),
     )
 
     rc = main_module.run(["--log-level", "INFO"])
 
     assert rc == 0
     assert state_saved["called"]
+
+
+def test_run_processes_only_new_files_based_on_state_ids(monkeypatch, tmp_path: Path) -> None:
+    watermark = tmp_path / "wm.png"
+    watermark.write_bytes(b"not-used")
+
+    class DummyConfig:
+        auth_mode = "certificate"
+        state_file = tmp_path / "state.json"
+        library_names = ["WatermarkTesting"]
+        library_watermark_paths = {"watermarktesting": watermark}
+
+    scenario = {"pass": 1}
+    uploads: list[str] = []
+    state_holder = {"state": RunState(None, frozenset())}
+
+    class DummyGraphClient:
+        def __init__(self, _config):  # noqa: ANN001
+            pass
+
+        def resolve_site_id(self) -> str:
+            return "site-id"
+
+        def list_drives(self, _site_id: str) -> list[dict]:
+            return [{"id": "drive-id", "name": "WatermarkTesting"}]
+
+        def iter_files(self, _drive_id: str) -> list[dict]:
+            if scenario["pass"] == 1:
+                return [
+                    {"id": "f1", "name": "a.docx", "createdDateTime": "2026-02-07T00:00:00Z"},
+                    {"id": "f2", "name": "b.xlsx", "createdDateTime": "2026-02-07T00:00:00Z"},
+                ]
+            return [
+                {"id": "f1", "name": "a.docx", "createdDateTime": "2026-02-07T00:00:00Z"},
+                {"id": "f2", "name": "b.xlsx", "createdDateTime": "2026-02-07T00:00:00Z"},
+                {"id": "f3", "name": "c.docx", "createdDateTime": "2026-02-07T00:00:00Z"},
+            ]
+
+        def download_file(self, _drive_id: str, _item_id: str) -> bytes:
+            return b"fake"
+
+        def upload_file(self, _drive_id: str, item_id: str, _data: bytes) -> None:
+            uploads.append(item_id)
+
+    def fake_save_state(_path, run_started, ids):  # noqa: ANN001
+        state_holder["state"] = RunState(run_started, frozenset(ids))
+
+    monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
+    monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
+    monkeypatch.setattr(main_module, "load_state", lambda _path: state_holder["state"])
+    monkeypatch.setattr(main_module, "save_state", fake_save_state)
+    monkeypatch.setattr(main_module, "apply_watermark", lambda _s, out, _w: out.write_bytes(b"wm"))
+
+    rc1 = main_module.run(["--log-level", "INFO"])
+    assert rc1 == 0
+    assert uploads == ["f1", "f2"]
+
+    scenario["pass"] = 2
+    rc2 = main_module.run(["--log-level", "INFO"])
+    assert rc2 == 0
+    assert uploads == ["f1", "f2", "f3"]

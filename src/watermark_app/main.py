@@ -78,6 +78,7 @@ def run(argv: list[str] | None = None) -> int:
 
     with tempfile.TemporaryDirectory(prefix="watermark_") as tmp_dir:
         tmp_root = Path(tmp_dir)
+        processed_item_ids = set(state.processed_item_ids)
         for drive in drives:
             drive_id = drive["id"]
             drive_name = drive.get("name", drive_id)
@@ -96,7 +97,13 @@ def run(argv: list[str] | None = None) -> int:
                     LOG.info("Skipping unsupported file type: %s", file_name)
                     skipped += 1
                     continue
-                if not should_process(item.get("createdDateTime"), state.last_successful_run_utc):
+                item_id = item.get("id")
+                if not should_process(
+                    item_id,
+                    item.get("createdDateTime"),
+                    state.last_successful_run_utc,
+                    state.processed_item_ids,
+                ):
                     skipped += 1
                     continue
 
@@ -111,6 +118,7 @@ def run(argv: list[str] | None = None) -> int:
                     if not args.dry_run:
                         graph.upload_file(drive_id, item_id, output_path.read_bytes())
                     processed += 1
+                    processed_item_ids.add(item_id)
                 except Exception as exc:  # noqa: BLE001
                     LOG.error("Failed file %s: %s", file_name, exc)
                     failed += 1
@@ -119,7 +127,7 @@ def run(argv: list[str] | None = None) -> int:
         if args.dry_run:
             LOG.info("Dry run complete; state file not updated.")
         else:
-            save_state(config.state_file, run_started)
+            save_state(config.state_file, run_started, processed_item_ids)
         LOG.info("Run successful. Processed=%s skipped=%s failed=%s", processed, skipped, failed)
         return 0
 
