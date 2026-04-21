@@ -69,3 +69,6 @@ Capture these in tickets or handoff notes:
 - Current auth mode (secret/cert) and cloud (`commercial`/`gcch`).
 - Last known good run timestamp.
 - Current blocker/error message.
+
+Also maintain and review:
+- `docs/SESSION_HISTORY.md` for curated conversation context snapshots.

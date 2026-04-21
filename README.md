@@ -7,6 +7,7 @@ Scheduled SharePoint watermark automation for new Office/PDF documents.
 - Operations runbook: `docs/OPERATIONS.md`
 - Troubleshooting guide: `docs/TROUBLESHOOTING.md`
 - Change history: `docs/CHANGELOG.md`
+- Session context snapshot: `docs/SESSION_HISTORY.md`
 
 ## What It Does
 
