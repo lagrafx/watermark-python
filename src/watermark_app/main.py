@@ -93,6 +93,7 @@ def run(argv: list[str] | None = None) -> int:
             for item in items:
                 file_name = item.get("name", "")
                 if not is_supported_extension(file_name):
+                    LOG.info("Skipping unsupported file type: %s", file_name)
                     skipped += 1
                     continue
                 if not should_process(item.get("createdDateTime"), state.last_successful_run_utc):
@@ -115,7 +116,10 @@ def run(argv: list[str] | None = None) -> int:
                     failed += 1
 
     if failed == 0:
-        save_state(config.state_file, run_started)
+        if args.dry_run:
+            LOG.info("Dry run complete; state file not updated.")
+        else:
+            save_state(config.state_file, run_started)
         LOG.info("Run successful. Processed=%s skipped=%s failed=%s", processed, skipped, failed)
         return 0
 
