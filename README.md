@@ -2,6 +2,12 @@
 
 Scheduled SharePoint watermark automation for new Office/PDF documents.
 
+## Project Docs
+
+- Operations runbook: `docs/OPERATIONS.md`
+- Troubleshooting guide: `docs/TROUBLESHOOTING.md`
+- Change history: `docs/CHANGELOG.md`
+
 ## What It Does
 
 - Connects to a SharePoint site through Microsoft Graph (app-only auth).
