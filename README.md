@@ -1,12 +1,12 @@
 # watermark-python
 
-Scheduled SharePoint watermark automation for new Word/Excel documents.
+Scheduled SharePoint watermark automation for new Office/PDF documents.
 
 ## What It Does
 
 - Connects to a SharePoint site through Microsoft Graph (app-only auth).
 - Scans one or more document libraries.
-- Finds newly created `.docx/.docm/.xlsx/.xlsm` files since the last successful run.
+- Finds newly created `.docx/.docm/.xlsx/.xlsm/.pptx/.pptm/.pdf` files since the last successful run.
 - Applies a PNG watermark to each file.
 - Uploads the updated file back to SharePoint.
 - Saves run state to a local JSON file.
@@ -103,6 +103,8 @@ Dry run:
 ```powershell
 python -m watermark_app --dry-run --log-level DEBUG
 ```
+
+Note: `--dry-run` does not update the run-state file.
 
 ## Schedule (Windows Task Scheduler)
 

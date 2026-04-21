@@ -19,7 +19,7 @@ LOG = logging.getLogger(__name__)
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Apply a PNG watermark to new Word/Excel files in SharePoint libraries."
+        description="Apply a PNG watermark to new Office/PDF files in SharePoint libraries."
     )
     parser.add_argument(
         "--dry-run",

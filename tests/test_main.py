@@ -9,7 +9,10 @@ from watermark_app.watermarking import is_supported_extension
 def test_supported_extensions() -> None:
     assert is_supported_extension("a.docx")
     assert is_supported_extension("a.xlsm")
-    assert not is_supported_extension("a.pdf")
+    assert is_supported_extension("a.pptx")
+    assert is_supported_extension("a.pptm")
+    assert is_supported_extension("a.pdf")
+    assert not is_supported_extension("a.txt")
 
 
 def test_should_process_with_no_state() -> None:
