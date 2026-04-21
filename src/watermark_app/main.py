@@ -11,7 +11,7 @@ from pathlib import Path
 
 from watermark_app.config import AppConfig
 from watermark_app.graph import GraphClient, GraphClientError
-from watermark_app.state import load_state, save_state, should_process
+from watermark_app.state import load_state, save_state
 from watermark_app.watermarking import apply_watermark, is_supported_extension
 
 LOG = logging.getLogger(__name__)
@@ -78,14 +78,16 @@ def run(argv: list[str] | None = None) -> int:
 
     with tempfile.TemporaryDirectory(prefix="watermark_") as tmp_dir:
         tmp_root = Path(tmp_dir)
-        processed_item_ids = set(state.processed_item_ids)
+        new_delta_links = dict(state.drive_delta_links or {})
         for drive in drives:
             drive_id = drive["id"]
             drive_name = drive.get("name", drive_id)
             watermark_path = config.library_watermark_paths[drive_name.lower()]
             LOG.info("Scanning library: %s", drive_name)
             try:
-                items = graph.iter_files(drive_id)
+                prior_delta_link = new_delta_links.get(drive_id)
+                items, latest_delta_link = graph.iter_changed_files(drive_id, prior_delta_link)
+                new_delta_links[drive_id] = latest_delta_link
             except GraphClientError as exc:
                 LOG.error("Failed to list files in %s: %s", drive_name, exc)
                 failed += 1
@@ -95,15 +97,6 @@ def run(argv: list[str] | None = None) -> int:
                 file_name = item.get("name", "")
                 if not is_supported_extension(file_name):
                     LOG.info("Skipping unsupported file type: %s", file_name)
-                    skipped += 1
-                    continue
-                item_id = item.get("id")
-                if not should_process(
-                    item_id,
-                    item.get("createdDateTime"),
-                    state.last_successful_run_utc,
-                    state.processed_item_ids,
-                ):
                     skipped += 1
                     continue
 
@@ -118,7 +111,6 @@ def run(argv: list[str] | None = None) -> int:
                     if not args.dry_run:
                         graph.upload_file(drive_id, item_id, output_path.read_bytes())
                     processed += 1
-                    processed_item_ids.add(item_id)
                 except Exception as exc:  # noqa: BLE001
                     LOG.error("Failed file %s: %s", file_name, exc)
                     failed += 1
@@ -127,7 +119,7 @@ def run(argv: list[str] | None = None) -> int:
         if args.dry_run:
             LOG.info("Dry run complete; state file not updated.")
         else:
-            save_state(config.state_file, run_started, processed_item_ids)
+            save_state(config.state_file, run_started, drive_delta_links=new_delta_links)
         LOG.info("Run successful. Processed=%s skipped=%s failed=%s", processed, skipped, failed)
         return 0
 

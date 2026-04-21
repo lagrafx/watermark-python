@@ -12,6 +12,7 @@ from pathlib import Path
 class RunState:
     last_successful_run_utc: datetime | None = None
     processed_item_ids: frozenset[str] = frozenset()
+    drive_delta_links: dict[str, str] | None = None
 
 
 def _parse_iso_datetime(value: str | None) -> datetime | None:
@@ -28,18 +29,34 @@ def load_state(path: Path) -> RunState:
     processed = data.get("processed_item_ids", [])
     if not isinstance(processed, list):
         processed = []
+    raw_delta_links = data.get("drive_delta_links", {})
+    if not isinstance(raw_delta_links, dict):
+        raw_delta_links = {}
+    delta_links: dict[str, str] = {}
+    for drive_id, link in raw_delta_links.items():
+        if isinstance(drive_id, str) and isinstance(link, str):
+            delta_links[drive_id] = link
     return RunState(
         last_successful_run_utc=_parse_iso_datetime(data.get("last_successful_run_utc")),
         processed_item_ids=frozenset(str(item_id) for item_id in processed),
+        drive_delta_links=delta_links,
     )
 
 
-def save_state(path: Path, run_started_utc: datetime, processed_item_ids: set[str]) -> None:
+def save_state(
+    path: Path,
+    run_started_utc: datetime,
+    processed_item_ids: set[str] | None = None,
+    drive_delta_links: dict[str, str] | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "last_successful_run_utc": run_started_utc.astimezone(timezone.utc).isoformat(),
-        "processed_item_ids": sorted(processed_item_ids),
+    payload: dict[str, object] = {
+        "last_successful_run_utc": run_started_utc.astimezone(timezone.utc).isoformat()
     }
+    if processed_item_ids:
+        payload["processed_item_ids"] = sorted(processed_item_ids)
+    if drive_delta_links is not None:
+        payload["drive_delta_links"] = drive_delta_links
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 

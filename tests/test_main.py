@@ -46,18 +46,22 @@ def test_run_dry_run_does_not_save_state(monkeypatch, tmp_path: Path) -> None:
         def list_drives(self, _site_id: str) -> list[dict]:
             return [{"id": "drive-id", "name": "WatermarkTesting"}]
 
-        def iter_files(self, _drive_id: str) -> list[dict]:
-            return []
+        def iter_changed_files(self, _drive_id: str, _delta_link: str | None = None):
+            return [], "delta-1"
 
     state_saved = {"called": False}
 
     monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
     monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
-    monkeypatch.setattr(main_module, "load_state", lambda _path: RunState(None, frozenset()))
+    monkeypatch.setattr(
+        main_module,
+        "load_state",
+        lambda _path: RunState(None, frozenset(), {"drive-id": "delta-0"}),
+    )
     monkeypatch.setattr(
         main_module,
         "save_state",
-        lambda _path, _run_started, _ids: state_saved.__setitem__("called", True),
+        lambda _path, _run_started, **_kwargs: state_saved.__setitem__("called", True),
     )
 
     rc = main_module.run(["--dry-run", "--log-level", "INFO"])
@@ -86,18 +90,22 @@ def test_run_non_dry_run_saves_state(monkeypatch, tmp_path: Path) -> None:
         def list_drives(self, _site_id: str) -> list[dict]:
             return [{"id": "drive-id", "name": "WatermarkTesting"}]
 
-        def iter_files(self, _drive_id: str) -> list[dict]:
-            return []
+        def iter_changed_files(self, _drive_id: str, _delta_link: str | None = None):
+            return [], "delta-1"
 
     state_saved = {"called": False}
 
     monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
     monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
-    monkeypatch.setattr(main_module, "load_state", lambda _path: RunState(None, frozenset()))
+    monkeypatch.setattr(
+        main_module,
+        "load_state",
+        lambda _path: RunState(None, frozenset(), {"drive-id": "delta-0"}),
+    )
     monkeypatch.setattr(
         main_module,
         "save_state",
-        lambda _path, _run_started, _ids: state_saved.__setitem__("called", True),
+        lambda _path, _run_started, **_kwargs: state_saved.__setitem__("called", True),
     )
 
     rc = main_module.run(["--log-level", "INFO"])
@@ -106,7 +114,7 @@ def test_run_non_dry_run_saves_state(monkeypatch, tmp_path: Path) -> None:
     assert state_saved["called"]
 
 
-def test_run_processes_only_new_files_based_on_state_ids(monkeypatch, tmp_path: Path) -> None:
+def test_run_processes_only_new_files_based_on_delta(monkeypatch, tmp_path: Path) -> None:
     watermark = tmp_path / "wm.png"
     watermark.write_bytes(b"not-used")
 
@@ -118,7 +126,7 @@ def test_run_processes_only_new_files_based_on_state_ids(monkeypatch, tmp_path: 
 
     scenario = {"pass": 1}
     uploads: list[str] = []
-    state_holder = {"state": RunState(None, frozenset())}
+    state_holder = {"state": RunState(None, frozenset(), {})}
 
     class DummyGraphClient:
         def __init__(self, _config):  # noqa: ANN001
@@ -130,17 +138,17 @@ def test_run_processes_only_new_files_based_on_state_ids(monkeypatch, tmp_path: 
         def list_drives(self, _site_id: str) -> list[dict]:
             return [{"id": "drive-id", "name": "WatermarkTesting"}]
 
-        def iter_files(self, _drive_id: str) -> list[dict]:
+        def iter_changed_files(self, _drive_id: str, delta_link: str | None = None):
             if scenario["pass"] == 1:
+                assert delta_link is None
                 return [
                     {"id": "f1", "name": "a.docx", "createdDateTime": "2026-02-07T00:00:00Z"},
                     {"id": "f2", "name": "b.xlsx", "createdDateTime": "2026-02-07T00:00:00Z"},
-                ]
+                ], "delta-1"
+            assert delta_link == "delta-1"
             return [
-                {"id": "f1", "name": "a.docx", "createdDateTime": "2026-02-07T00:00:00Z"},
-                {"id": "f2", "name": "b.xlsx", "createdDateTime": "2026-02-07T00:00:00Z"},
-                {"id": "f3", "name": "c.docx", "createdDateTime": "2026-02-07T00:00:00Z"},
-            ]
+                {"id": "f3", "name": "c.docx", "createdDateTime": "2026-02-07T00:00:00Z"}
+            ], "delta-2"
 
         def download_file(self, _drive_id: str, _item_id: str) -> bytes:
             return b"fake"
@@ -148,8 +156,10 @@ def test_run_processes_only_new_files_based_on_state_ids(monkeypatch, tmp_path: 
         def upload_file(self, _drive_id: str, item_id: str, _data: bytes) -> None:
             uploads.append(item_id)
 
-    def fake_save_state(_path, run_started, ids):  # noqa: ANN001
-        state_holder["state"] = RunState(run_started, frozenset(ids))
+    def fake_save_state(_path, run_started, **kwargs):  # noqa: ANN001
+        ids = kwargs.get("processed_item_ids") or set()
+        links = kwargs.get("drive_delta_links") or {}
+        state_holder["state"] = RunState(run_started, frozenset(ids), dict(links))
 
     monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
     monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
@@ -160,8 +170,10 @@ def test_run_processes_only_new_files_based_on_state_ids(monkeypatch, tmp_path: 
     rc1 = main_module.run(["--log-level", "INFO"])
     assert rc1 == 0
     assert uploads == ["f1", "f2"]
+    assert state_holder["state"].drive_delta_links == {"drive-id": "delta-1"}
 
     scenario["pass"] = 2
     rc2 = main_module.run(["--log-level", "INFO"])
     assert rc2 == 0
     assert uploads == ["f1", "f2", "f3"]
+    assert state_holder["state"].drive_delta_links == {"drive-id": "delta-2"}

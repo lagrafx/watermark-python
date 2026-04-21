@@ -87,6 +87,34 @@ class GraphClient:
                 queue.append(next_link)
         return files
 
+    def iter_changed_files(
+        self, drive_id: str, delta_link: str | None = None
+    ) -> tuple[list[dict], str]:
+        files: list[dict] = []
+        if delta_link:
+            url = delta_link
+        else:
+            url = f"{self.config.graph_base_url}/drives/{drive_id}/root/delta"
+
+        final_delta_link: str | None = None
+        while url:
+            response = self._request("GET", url, operation="list changed drive items", timeout=60)
+            self._raise_for_error(response, "list changed drive items")
+            payload = response.json()
+            for item in payload.get("value", []):
+                if "file" in item and "deleted" not in item:
+                    files.append(item)
+            next_link = payload.get("@odata.nextLink")
+            if next_link:
+                url = next_link
+                continue
+            final_delta_link = payload.get("@odata.deltaLink")
+            break
+
+        if not final_delta_link:
+            raise GraphClientError("Failed to list changed drive items: missing @odata.deltaLink")
+        return files, final_delta_link
+
     def download_file(self, drive_id: str, item_id: str) -> bytes:
         response = self._request(
             "GET",
