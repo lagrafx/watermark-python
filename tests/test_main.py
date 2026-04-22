@@ -147,6 +147,8 @@ def test_run_processes_only_new_files_based_on_delta(monkeypatch, tmp_path: Path
                 ], "delta-1"
             assert delta_link == "delta-1"
             return [
+                {"id": "f1", "name": "a.docx", "createdDateTime": "2026-02-07T00:00:00Z"},
+                {"id": "f2", "name": "b.xlsx", "createdDateTime": "2026-02-07T00:00:00Z"},
                 {"id": "f3", "name": "c.docx", "createdDateTime": "2026-02-07T00:00:00Z"}
             ], "delta-2"
 
@@ -177,3 +179,4 @@ def test_run_processes_only_new_files_based_on_delta(monkeypatch, tmp_path: Path
     assert rc2 == 0
     assert uploads == ["f1", "f2", "f3"]
     assert state_holder["state"].drive_delta_links == {"drive-id": "delta-2"}
+    assert state_holder["state"].processed_item_ids == frozenset({"f1", "f2", "f3"})

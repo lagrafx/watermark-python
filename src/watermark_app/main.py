@@ -79,6 +79,7 @@ def run(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory(prefix="watermark_") as tmp_dir:
         tmp_root = Path(tmp_dir)
         new_delta_links = dict(state.drive_delta_links or {})
+        processed_item_ids = set(state.processed_item_ids)
         for drive in drives:
             drive_id = drive["id"]
             drive_name = drive.get("name", drive_id)
@@ -99,6 +100,10 @@ def run(argv: list[str] | None = None) -> int:
                     LOG.info("Skipping unsupported file type: %s", file_name)
                     skipped += 1
                     continue
+                item_id = item.get("id")
+                if item_id and item_id in processed_item_ids:
+                    skipped += 1
+                    continue
 
                 LOG.info("Processing %s", item.get("webUrl", file_name))
                 item_id = item["id"]
@@ -111,6 +116,7 @@ def run(argv: list[str] | None = None) -> int:
                     if not args.dry_run:
                         graph.upload_file(drive_id, item_id, output_path.read_bytes())
                     processed += 1
+                    processed_item_ids.add(item_id)
                 except Exception as exc:  # noqa: BLE001
                     LOG.error("Failed file %s: %s", file_name, exc)
                     failed += 1
@@ -119,7 +125,12 @@ def run(argv: list[str] | None = None) -> int:
         if args.dry_run:
             LOG.info("Dry run complete; state file not updated.")
         else:
-            save_state(config.state_file, run_started, drive_delta_links=new_delta_links)
+            save_state(
+                config.state_file,
+                run_started,
+                processed_item_ids=processed_item_ids,
+                drive_delta_links=new_delta_links,
+            )
         LOG.info("Run successful. Processed=%s skipped=%s failed=%s", processed, skipped, failed)
         return 0
 
