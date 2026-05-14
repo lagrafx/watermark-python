@@ -45,6 +45,14 @@ Run and operate the SharePoint watermark automation safely in production.
    - `.\watermark-app.exe --dry-run --log-level INFO`
    - `.\watermark-app.exe --log-level INFO`
 
+## Portable Publish Flow (GitHub)
+Each portable build now generates:
+- `PORTABLE_RELEASE_MANIFEST.json`
+- `PORTABLE_RELEASE_NOTES.md`
+
+Use them when publishing to `watermark-python-portable` so every portable tag maps back
+to an exact source commit.
+
 ## Metadata Field Discovery
 Before configuring metadata-based watermark rules, list fields from the target libraries:
 - Source run: `python -m watermark_app --list-fields --log-level INFO`

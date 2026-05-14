@@ -15,6 +15,9 @@
 - Docs updated with field-discovery usage:
   - `README.md`
   - `docs/OPERATIONS.md`
+- Portable build now auto-generates release mapping artifacts:
+  - `PORTABLE_RELEASE_MANIFEST.json`
+  - `PORTABLE_RELEASE_NOTES.md`
 
 ## 2026-04-21
 

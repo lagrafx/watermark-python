@@ -170,6 +170,8 @@ This produces a timestamped folder and zip in `C:\Projects` containing:
 - `.env.example`
 - watermark PNG assets
 - `RUN_ME_FIRST.txt`
+- `PORTABLE_RELEASE_MANIFEST.json` (source/portable mapping metadata)
+- `PORTABLE_RELEASE_NOTES.md` (ready-to-paste release notes for portable repo)
 
 On VM:
 
