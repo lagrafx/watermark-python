@@ -8,6 +8,7 @@ Scheduled SharePoint watermark automation for new Office/PDF documents.
 - Troubleshooting guide: `docs/TROUBLESHOOTING.md`
 - Change history: `docs/CHANGELOG.md`
 - Session context snapshot: `docs/SESSION_HISTORY.md`
+- Release/rollback policy: `docs/RELEASE_POLICY.md`
 
 ## What It Does
 
