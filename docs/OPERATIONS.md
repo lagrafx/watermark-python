@@ -45,6 +45,16 @@ Run and operate the SharePoint watermark automation safely in production.
    - `.\watermark-app.exe --dry-run --log-level INFO`
    - `.\watermark-app.exe --log-level INFO`
 
+## Metadata Field Discovery
+Before configuring metadata-based watermark rules, list fields from the target libraries:
+- Source run: `python -m watermark_app --list-fields --log-level INFO`
+- Portable run: `.\watermark-app.exe --list-fields --log-level INFO`
+
+Output includes:
+- `field=` (SharePoint internal field name; use this in rules)
+- `displayName=` (friendly label shown in SharePoint UI)
+- `readOnly=` / `hidden=` (helps identify system columns)
+
 ## Schedule (Task Scheduler)
 Use `Create Task` (not Basic Task):
 - Run whether user is logged on or not.

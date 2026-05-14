@@ -106,6 +106,15 @@ Authentication mode:
 python -m watermark_app --log-level INFO
 ```
 
+List metadata fields for targeted libraries:
+
+```powershell
+python -m watermark_app --list-fields --log-level INFO
+```
+
+Use this to discover SharePoint internal field names (`field=...`) and display names
+(`displayName=...`) before defining metadata-based watermark rules.
+
 Dry run:
 
 ```powershell

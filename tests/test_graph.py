@@ -159,3 +159,28 @@ def test_iter_changed_files_uses_delta_pagination(monkeypatch: pytest.MonkeyPatc
     assert calls[1] == "https://graph.microsoft.us/v1.0/drives/delta-next"
     assert [item["id"] for item in items] == ["f1", "f2"]
     assert delta_link == "https://graph.microsoft.us/v1.0/drives/delta-final"
+
+
+def test_list_library_fields_calls_expected_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = GraphClient.__new__(GraphClient)
+    client.config = type("Cfg", (), {"graph_base_url": "https://graph.microsoft.us/v1.0"})()
+    seen = {"url": None}
+
+    def fake_request(method, url, operation, timeout):  # noqa: ANN001
+        seen["url"] = url
+        assert method == "GET"
+        assert operation == "list library fields"
+        assert timeout == 60
+        return _DummyResponse(
+            ok=True,
+            status_code=200,
+            payload={"value": [{"name": "RecordStatus", "displayName": "Record Status"}]},
+        )
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    monkeypatch.setattr(client, "_raise_for_error", lambda _response, _operation: None)
+
+    fields = client.list_library_fields("drive-id")
+
+    assert seen["url"] == "https://graph.microsoft.us/v1.0/drives/drive-id/list/columns"
+    assert fields == [{"name": "RecordStatus", "displayName": "Record Status"}]

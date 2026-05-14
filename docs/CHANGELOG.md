@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-05-14
+
+### Added
+- New CLI mode:
+  - `--list-fields` prints SharePoint library metadata fields for targeted libraries.
+- Field details in output:
+  - `field` (internal name)
+  - `displayName` (friendly label)
+  - `readOnly`
+  - `hidden`
+
+### Updated
+- Docs updated with field-discovery usage:
+  - `README.md`
+  - `docs/OPERATIONS.md`
+
 ## 2026-04-21
 
 ### Added

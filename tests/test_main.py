@@ -180,3 +180,43 @@ def test_run_processes_only_new_files_based_on_delta(monkeypatch, tmp_path: Path
     assert uploads == ["f1", "f2", "f3"]
     assert state_holder["state"].drive_delta_links == {"drive-id": "delta-2"}
     assert state_holder["state"].processed_item_ids == frozenset({"f1", "f2", "f3"})
+
+
+def test_run_list_fields_mode_exits_without_saving_state(monkeypatch, tmp_path: Path) -> None:
+    watermark = tmp_path / "wm.png"
+    watermark.write_bytes(b"not-used")
+
+    class DummyConfig:
+        auth_mode = "certificate"
+        state_file = tmp_path / "state.json"
+        library_names = ["WatermarkTesting"]
+        library_watermark_paths = {"watermarktesting": watermark}
+
+    class DummyGraphClient:
+        def __init__(self, _config):  # noqa: ANN001
+            pass
+
+        def resolve_site_id(self) -> str:
+            return "site-id"
+
+        def list_drives(self, _site_id: str) -> list[dict]:
+            return [{"id": "drive-id", "name": "WatermarkTesting"}]
+
+        def list_library_fields(self, _drive_id: str) -> list[dict]:
+            return [{"name": "RecordStatus", "displayName": "Record Status"}]
+
+    state_saved = {"called": False}
+
+    monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
+    monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
+    monkeypatch.setattr(main_module, "load_state", lambda _path: RunState(None, frozenset(), {}))
+    monkeypatch.setattr(
+        main_module,
+        "save_state",
+        lambda _path, _run_started, **_kwargs: state_saved.__setitem__("called", True),
+    )
+
+    rc = main_module.run(["--list-fields", "--log-level", "INFO"])
+
+    assert rc == 0
+    assert not state_saved["called"]

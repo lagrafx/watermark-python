@@ -32,6 +32,14 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Console log verbosity.",
     )
+    parser.add_argument(
+        "--list-fields",
+        action="store_true",
+        help=(
+            "List SharePoint metadata fields (internal + display names) for targeted "
+            "libraries, then exit."
+        ),
+    )
     return parser
 
 
@@ -59,6 +67,34 @@ def run(argv: list[str] | None = None) -> int:
     library_filter = {name.lower() for name in config.library_names}
     if library_filter:
         drives = [d for d in drives if d.get("name", "").lower() in library_filter]
+
+    if args.list_fields:
+        if not drives:
+            LOG.warning("No libraries matched the current SP_LIBRARY_NAMES filter.")
+            return 0
+        for drive in drives:
+            drive_id = drive["id"]
+            drive_name = drive.get("name", drive_id)
+            LOG.info("Library: %s", drive_name)
+            try:
+                fields = graph.list_library_fields(drive_id)
+            except GraphClientError as exc:
+                LOG.error("Failed to list fields for %s: %s", drive_name, exc)
+                continue
+            for field in sorted(fields, key=lambda f: (f.get("name") or "").lower()):
+                internal_name = field.get("name", "")
+                display_name = field.get("displayName", "")
+                read_only = field.get("readOnly", False)
+                hidden = field.get("hidden", False)
+                LOG.info(
+                    "  field=%s displayName=%s readOnly=%s hidden=%s",
+                    internal_name,
+                    display_name,
+                    read_only,
+                    hidden,
+                )
+        LOG.info("Field listing complete.")
+        return 0
 
     missing_mappings = [
         d.get("name", d["id"])

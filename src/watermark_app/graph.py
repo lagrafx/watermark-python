@@ -67,6 +67,16 @@ class GraphClient:
         self._raise_for_error(response, "list drives")
         return response.json().get("value", [])
 
+    def list_library_fields(self, drive_id: str) -> list[dict]:
+        response = self._request(
+            "GET",
+            f"{self.config.graph_base_url}/drives/{drive_id}/list/columns",
+            operation="list library fields",
+            timeout=60,
+        )
+        self._raise_for_error(response, "list library fields")
+        return response.json().get("value", [])
+
     def iter_files(self, drive_id: str) -> list[dict]:
         files: list[dict] = []
         queue: list[str] = [f"{self.config.graph_base_url}/drives/{drive_id}/root/children"]
