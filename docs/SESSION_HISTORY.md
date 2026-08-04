@@ -6,6 +6,10 @@ Preserve key project context from chat threads in-repo so recovery does not depe
 ## Scope
 This is a curated summary, not a full verbatim transcript.
 
+## Latest Detailed Handoff
+- `docs/SESSION_HISTORY_2026-08-04_HANDOFF.md`
+- Captures the current repo split, portable build/release state, GitHub tags, app behavior, and laptop migration notes.
+
 ## Current State (as of 2026-04-21)
 - Main repo: `https://github.com/lagrafx/watermark-python`
 - Portable repo: `https://github.com/lagrafx/watermark-python-portable`
