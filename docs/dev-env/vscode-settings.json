@@ -1,0 +1,27 @@
+{
+    "terminal.integrated.enableMultiLinePasteWarning": "never",
+    "github.copilot.nextEditSuggestions.enabled": true,
+    "terminal.integrated.profiles.windows": {
+        "PowerShell": {
+            "source": "PowerShell",
+            "icon": "terminal-powershell"
+        },
+        "Command Prompt": {
+            "path": [
+                "${env:windir}\\Sysnative\\cmd.exe",
+                "${env:windir}\\System32\\cmd.exe"
+            ],
+            "args": [],
+            "icon": "terminal-cmd"
+        },
+        "Git Bash": {
+            "source": "Git Bash"
+        }
+    },
+    "chat.tools.terminal.autoApprove": {
+        "ForEach-Object": true,
+        "ConvertFrom-Json": true,
+        "Out-Null": true,
+        "Add-Type": true
+    }
+}
