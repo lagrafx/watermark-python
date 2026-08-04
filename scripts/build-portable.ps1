@@ -100,10 +100,10 @@ $manifest | ConvertTo-Json -Depth 5 | Set-Content "$deploy\PORTABLE_RELEASE_MANI
 - Build timestamp (UTC): $((Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"))
 
 ## Publish Checklist
-1. Create/update release in `watermark-python-portable` with tag: `$portableTag`.
-2. Upload artifact: `$(Split-Path -Leaf $zip)`.
+1. Create/update release in watermark-python-portable with tag: $portableTag.
+2. Upload artifact: $(Split-Path -Leaf $zip).
 3. Paste the metadata above into the release notes.
-4. Attach `PORTABLE_RELEASE_MANIFEST.json` as a release asset (optional but recommended).
+4. Attach PORTABLE_RELEASE_MANIFEST.json as a release asset (optional but recommended).
 "@ | Set-Content "$deploy\PORTABLE_RELEASE_NOTES.md" -Encoding UTF8
 
 Write-Host "Creating zip: $zip"
