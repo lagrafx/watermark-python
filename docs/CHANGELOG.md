@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-08-10
+
+### Added
+- More run diagnostics at `INFO` level:
+  - target site and state-file path
+  - configured library filter and watermark mappings
+  - discovered SharePoint library/drive names
+  - selected drive ID and watermark path
+  - whether each library uses stored delta state or initial/full baseline
+  - per-library changed/processed/skipped/failed summary
+  - state save path, processed ID count, delta-link count, and state-file size
+
+### Fixed
+- Runs now fail with an explicit error if `SP_LIBRARY_NAMES` matches no SharePoint
+  libraries/drives instead of exiting successfully with no work.
+- State output now always includes `processed_item_ids`, even when empty, making
+  state-file inspection less ambiguous.
+
 ## 2026-05-14
 
 ### Added

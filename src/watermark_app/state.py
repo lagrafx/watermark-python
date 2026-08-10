@@ -51,10 +51,9 @@ def save_state(
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload: dict[str, object] = {
-        "last_successful_run_utc": run_started_utc.astimezone(timezone.utc).isoformat()
+        "last_successful_run_utc": run_started_utc.astimezone(timezone.utc).isoformat(),
+        "processed_item_ids": sorted(processed_item_ids or set()),
     }
-    if processed_item_ids:
-        payload["processed_item_ids"] = sorted(processed_item_ids)
     if drive_delta_links is not None:
         payload["drive_delta_links"] = drive_delta_links
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
