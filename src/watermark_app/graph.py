@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import msal
 import requests
 
 from watermark_app.config import AppConfig
+
+LOG = logging.getLogger(__name__)
 
 
 class GraphClientError(RuntimeError):
@@ -107,14 +110,63 @@ class GraphClient:
             url = f"{self.config.graph_base_url}/drives/{drive_id}/root/delta"
 
         final_delta_link: str | None = None
+        page_number = 0
+        total_raw_items = 0
+        total_files = 0
+        total_folders = 0
+        total_deleted = 0
+        total_other = 0
         while url:
+            page_number += 1
             response = self._request("GET", url, operation="list changed drive items", timeout=60)
             self._raise_for_error(response, "list changed drive items")
             payload = response.json()
-            for item in payload.get("value", []):
+            values = payload.get("value", [])
+            if not isinstance(values, list):
+                raise GraphClientError(
+                    "Failed to list changed drive items: response 'value' was not a list"
+                )
+
+            page_files = 0
+            page_folders = 0
+            page_deleted = 0
+            page_other = 0
+            for item in values:
+                if not isinstance(item, dict):
+                    page_other += 1
+                    continue
+                if "deleted" in item:
+                    page_deleted += 1
+                    continue
                 if "file" in item and "deleted" not in item:
+                    page_files += 1
                     files.append(item)
+                    continue
+                if "folder" in item:
+                    page_folders += 1
+                    continue
+                page_other += 1
+
             next_link = payload.get("@odata.nextLink")
+            page_raw_items = len(values)
+            total_raw_items += page_raw_items
+            total_files += page_files
+            total_folders += page_folders
+            total_deleted += page_deleted
+            total_other += page_other
+            LOG.info(
+                "Delta page %s for drive %s: raw_items=%s files=%s folders=%s "
+                "deleted=%s other=%s next_link=%s delta_link=%s",
+                page_number,
+                drive_id,
+                page_raw_items,
+                page_files,
+                page_folders,
+                page_deleted,
+                page_other,
+                bool(next_link),
+                bool(payload.get("@odata.deltaLink")),
+            )
             if next_link:
                 url = next_link
                 continue
@@ -123,6 +175,17 @@ class GraphClient:
 
         if not final_delta_link:
             raise GraphClientError("Failed to list changed drive items: missing @odata.deltaLink")
+        LOG.info(
+            "Delta complete for drive %s: pages=%s raw_items=%s files=%s folders=%s "
+            "deleted=%s other=%s",
+            drive_id,
+            page_number,
+            total_raw_items,
+            total_files,
+            total_folders,
+            total_deleted,
+            total_other,
+        )
         return files, final_delta_link
 
     def download_file(self, drive_id: str, item_id: str) -> bytes:

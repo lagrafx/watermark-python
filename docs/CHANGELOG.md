@@ -11,6 +11,13 @@
   - whether each library uses stored delta state or initial/full baseline
   - per-library changed/processed/skipped/failed summary
   - state save path, processed ID count, delta-link count, and state-file size
+- Graph delta pagination diagnostics:
+  - page number
+  - raw item count
+  - file/folder/deleted/other counts per page
+  - whether each page had a next link or final delta link
+  - final page/raw/file/folder/deleted/other totals
+- Periodic per-library progress logging every 250 changed file items.
 
 ### Fixed
 - Runs now fail with an explicit error if `SP_LIBRARY_NAMES` matches no SharePoint

@@ -161,6 +161,24 @@ def test_iter_changed_files_uses_delta_pagination(monkeypatch: pytest.MonkeyPatc
     assert delta_link == "https://graph.microsoft.us/v1.0/drives/delta-final"
 
 
+def test_iter_changed_files_rejects_non_list_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = GraphClient.__new__(GraphClient)
+    client.config = type("Cfg", (), {"graph_base_url": "https://graph.microsoft.us/v1.0"})()
+
+    def fake_request(method, url, operation, timeout):  # noqa: ANN001
+        return _DummyResponse(
+            ok=True,
+            status_code=200,
+            payload={"value": {"not": "a list"}, "@odata.deltaLink": "delta-final"},
+        )
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    monkeypatch.setattr(client, "_raise_for_error", lambda _response, _operation: None)
+
+    with pytest.raises(GraphClientError, match="response 'value' was not a list"):
+        client.iter_changed_files("drive-id")
+
+
 def test_list_library_fields_calls_expected_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     client = GraphClient.__new__(GraphClient)
     client.config = type("Cfg", (), {"graph_base_url": "https://graph.microsoft.us/v1.0"})()

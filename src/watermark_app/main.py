@@ -178,7 +178,20 @@ def run(argv: list[str] | None = None) -> int:
             library_unsupported = 0
             library_already_processed = 0
             library_failed = 0
-            for item in items:
+            for item_index, item in enumerate(items, start=1):
+                if item_index == 1 or item_index % 250 == 0 or item_index == len(items):
+                    LOG.info(
+                        "Progress for %s: evaluating item %s/%s "
+                        "(processed=%s skipped_already_processed=%s "
+                        "skipped_unsupported=%s failed=%s)",
+                        drive_name,
+                        item_index,
+                        len(items),
+                        library_processed,
+                        library_already_processed,
+                        library_unsupported,
+                        library_failed,
+                    )
                 file_name = item.get("name", "")
                 if not is_supported_extension(file_name):
                     LOG.debug("Skipping unsupported file type: %s", file_name)
