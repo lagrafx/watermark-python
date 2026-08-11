@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 from dataclasses import dataclass
 
@@ -50,6 +52,16 @@ class GraphClient:
         if not token:
             raise GraphClientError(f"Failed to acquire access token: {token_result}")
         self._headers = {"Authorization": f"Bearer {token}"}
+        self._token_claims = self._decode_token_claims(token)
+
+    @property
+    def access_identity(self) -> str:
+        """Return the application identity used for Graph access."""
+        for claim in ("app_displayname", "appid", "azp", "client_id"):
+            value = self._token_claims.get(claim)
+            if isinstance(value, str) and value.strip():
+                return value
+        return self.config.client_id
 
     def resolve_site_id(self) -> str:
         site_path = self.config.site_path
@@ -79,6 +91,16 @@ class GraphClient:
         )
         self._raise_for_error(response, "list library fields")
         return response.json().get("value", [])
+
+    def get_library_details(self, drive_id: str) -> dict:
+        response = self._request(
+            "GET",
+            f"{self.config.graph_base_url}/drives/{drive_id}/list",
+            operation="get library details",
+            timeout=60,
+        )
+        self._raise_for_error(response, "get library details")
+        return response.json()
 
     def iter_files(self, drive_id: str) -> list[dict]:
         files: list[dict] = []
@@ -209,6 +231,27 @@ class GraphClient:
         )
         self._raise_for_error(response, "upload file")
 
+    def create_root_file(self, drive_id: str, file_name: str, data: bytes) -> dict:
+        response = self._request(
+            "PUT",
+            f"{self.config.graph_base_url}/drives/{drive_id}/root:/{file_name}:/content",
+            operation="create root file",
+            headers={"Content-Type": "text/plain"},
+            data=data,
+            timeout=120,
+        )
+        self._raise_for_error(response, "create root file")
+        return response.json()
+
+    def delete_drive_item(self, drive_id: str, item_id: str) -> None:
+        response = self._request(
+            "DELETE",
+            f"{self.config.graph_base_url}/drives/{drive_id}/items/{item_id}",
+            operation="delete drive item",
+            timeout=120,
+        )
+        self._raise_for_error(response, "delete drive item")
+
     def _request(
         self,
         method: str,
@@ -231,6 +274,7 @@ class GraphClient:
             if not token:
                 raise GraphClientError(f"Failed to refresh access token: {token_result}")
             self._headers = {"Authorization": f"Bearer {token}"}
+            self._token_claims = self._decode_token_claims(token)
             response = requests.request(
                 method=method,
                 url=url,
@@ -242,6 +286,20 @@ class GraphClient:
 
     def _acquire_access_token(self) -> dict:
         return self._msal_app.acquire_token_for_client(scopes=self._scope)
+
+    @staticmethod
+    def _decode_token_claims(token: str) -> dict:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        payload = parts[1]
+        padding = "=" * (-len(payload) % 4)
+        try:
+            decoded = base64.urlsafe_b64decode(f"{payload}{padding}")
+            claims = json.loads(decoded)
+        except Exception:  # noqa: BLE001
+            return {}
+        return claims if isinstance(claims, dict) else {}
 
     @staticmethod
     def _is_invalid_token_error(response: requests.Response) -> bool:

@@ -115,6 +115,53 @@ python -m watermark_app --list-fields --log-level INFO
 Use this to discover SharePoint internal field names (`field=...`) and display names
 (`displayName=...`) before defining metadata-based watermark rules.
 
+Run read-only diagnostics for targeted libraries:
+
+```powershell
+python -m watermark_app --diagnose-libraries --log-level INFO
+```
+
+Portable EXE equivalent:
+
+```powershell
+.\watermark-app.exe --diagnose-libraries --log-level INFO
+```
+
+This reports:
+
+- The Entra application identity used to access each targeted library.
+- Matching SharePoint library/drive name, ID, and URL.
+- Whether a saved Graph delta link exists for that library.
+- Whether the library has a configured watermark mapping.
+- Graph list details exposed for the library, including list ID, display name,
+  template, content-types-enabled flag, and hidden flag when Graph returns them.
+- Required editable metadata fields that may interfere with replacing files.
+- Counts of read-only and hidden fields.
+
+This command does not watermark files, upload files, delete files, or save run state.
+Some SharePoint settings are not exposed by Microsoft Graph; retention labels,
+checked-out files, locked files, approval workflow behavior, and policy restrictions
+may still need to be confirmed in SharePoint Admin or by a controlled write test.
+
+Run diagnostics with a controlled write test:
+
+```powershell
+.\watermark-app.exe --diagnose-libraries --write-probe --log-level INFO
+```
+
+Source repo equivalent:
+
+```powershell
+python -m watermark_app --diagnose-libraries --write-probe --log-level INFO
+```
+
+The write probe creates a tiny temporary `.txt` file in the root of each targeted
+library, updates it, and deletes it. It logs the exact failing step (`create`,
+`update`, or `delete`) and the Graph error response. Use this when one library
+works but another library in the same site does not, because it helps isolate
+library-specific permissions, checkout, metadata, retention, approval, or policy
+issues without touching customer documents.
+
 Dry run:
 
 ```powershell

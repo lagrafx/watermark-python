@@ -39,6 +39,8 @@ def test_run_dry_run_does_not_save_state(monkeypatch, tmp_path: Path) -> None:
         site_path = "/sites/Test"
 
     class DummyGraphClient:
+        access_identity = "Watermark - Python"
+
         def __init__(self, _config):  # noqa: ANN001
             pass
 
@@ -85,6 +87,8 @@ def test_run_non_dry_run_saves_state(monkeypatch, tmp_path: Path) -> None:
         site_path = "/sites/Test"
 
     class DummyGraphClient:
+        access_identity = "Watermark - Python"
+
         def __init__(self, _config):  # noqa: ANN001
             pass
 
@@ -131,6 +135,8 @@ def test_run_fails_when_library_filter_matches_no_drives(monkeypatch, tmp_path: 
         site_path = "/sites/Test"
 
     class DummyGraphClient:
+        access_identity = "Watermark - Python"
+
         def __init__(self, _config):  # noqa: ANN001
             pass
 
@@ -174,6 +180,8 @@ def test_run_processes_only_new_files_based_on_delta(monkeypatch, tmp_path: Path
     state_holder = {"state": RunState(None, frozenset(), {})}
 
     class DummyGraphClient:
+        access_identity = "Watermark - Python"
+
         def __init__(self, _config):  # noqa: ANN001
             pass
 
@@ -240,6 +248,8 @@ def test_run_list_fields_mode_exits_without_saving_state(monkeypatch, tmp_path: 
         site_path = "/sites/Test"
 
     class DummyGraphClient:
+        access_identity = "Watermark - Python"
+
         def __init__(self, _config):  # noqa: ANN001
             pass
 
@@ -266,4 +276,201 @@ def test_run_list_fields_mode_exits_without_saving_state(monkeypatch, tmp_path: 
     rc = main_module.run(["--list-fields", "--log-level", "INFO"])
 
     assert rc == 0
+    assert not state_saved["called"]
+
+
+def test_run_diagnose_libraries_mode_exits_without_saving_state(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    watermark = tmp_path / "wm.png"
+    watermark.write_bytes(b"not-used")
+
+    class DummyConfig:
+        auth_mode = "certificate"
+        state_file = tmp_path / "state.json"
+        library_names = ["Archive"]
+        library_watermark_paths = {"archive": watermark}
+        site_hostname = "contoso.sharepoint.com"
+        site_path = "/sites/Test"
+
+    class DummyGraphClient:
+        access_identity = "Watermark - Python"
+
+        def __init__(self, _config):  # noqa: ANN001
+            pass
+
+        def resolve_site_id(self) -> str:
+            return "site-id"
+
+        def list_drives(self, _site_id: str) -> list[dict]:
+            return [{"id": "drive-id", "name": "Archive", "webUrl": "https://sp/Archive"}]
+
+        def get_library_details(self, _drive_id: str) -> dict:
+            return {
+                "id": "list-id",
+                "displayName": "Archive",
+                "name": "Archive",
+                "webUrl": "https://sp/Archive",
+                "list": {
+                    "template": "documentLibrary",
+                    "contentTypesEnabled": False,
+                    "hidden": False,
+                },
+                "sharepointIds": {"listId": "sp-list-id"},
+            }
+
+        def list_library_fields(self, _drive_id: str) -> list[dict]:
+            return [
+                {
+                    "name": "RequiredCategory",
+                    "displayName": "Required Category",
+                    "required": True,
+                    "readOnly": False,
+                    "hidden": False,
+                },
+                {
+                    "name": "ReadOnlyField",
+                    "displayName": "Read Only Field",
+                    "required": False,
+                    "readOnly": True,
+                    "hidden": False,
+                },
+            ]
+
+    state_saved = {"called": False}
+
+    monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
+    monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
+    monkeypatch.setattr(
+        main_module,
+        "load_state",
+        lambda _path: RunState(None, frozenset(), {"drive-id": "delta-0"}),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "save_state",
+        lambda _path, _run_started, **_kwargs: state_saved.__setitem__("called", True),
+    )
+
+    rc = main_module.run(["--diagnose-libraries", "--log-level", "INFO"])
+
+    assert rc == 0
+    assert not state_saved["called"]
+
+
+def test_run_diagnose_libraries_fails_on_missing_watermark_mapping(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class DummyConfig:
+        auth_mode = "certificate"
+        state_file = tmp_path / "state.json"
+        library_names = ["Archive"]
+        library_watermark_paths = {}
+        site_hostname = "contoso.sharepoint.com"
+        site_path = "/sites/Test"
+
+    class DummyGraphClient:
+        access_identity = "Watermark - Python"
+
+        def __init__(self, _config):  # noqa: ANN001
+            pass
+
+        def resolve_site_id(self) -> str:
+            return "site-id"
+
+        def list_drives(self, _site_id: str) -> list[dict]:
+            return [{"id": "drive-id", "name": "Archive"}]
+
+        def get_library_details(self, _drive_id: str) -> dict:
+            return {"id": "list-id", "displayName": "Archive", "list": {}}
+
+        def list_library_fields(self, _drive_id: str) -> list[dict]:
+            return []
+
+    monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
+    monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
+    monkeypatch.setattr(main_module, "load_state", lambda _path: RunState(None, frozenset(), {}))
+
+    rc = main_module.run(["--diagnose-libraries", "--log-level", "INFO"])
+
+    assert rc == 1
+
+
+def test_run_write_probe_requires_diagnose_libraries(monkeypatch) -> None:
+    monkeypatch.setattr(
+        main_module.AppConfig,
+        "from_env",
+        lambda: (_ for _ in ()).throw(AssertionError("config should not load")),
+    )
+
+    rc = main_module.run(["--write-probe", "--log-level", "INFO"])
+
+    assert rc == 2
+
+
+def test_run_diagnose_libraries_write_probe_create_update_delete(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    watermark = tmp_path / "wm.png"
+    watermark.write_bytes(b"not-used")
+    operations: list[tuple[str, str]] = []
+
+    class DummyConfig:
+        auth_mode = "certificate"
+        state_file = tmp_path / "state.json"
+        library_names = ["Archive"]
+        library_watermark_paths = {"archive": watermark}
+        site_hostname = "contoso.sharepoint.com"
+        site_path = "/sites/Test"
+
+    class DummyGraphClient:
+        access_identity = "Watermark - Python"
+
+        def __init__(self, _config):  # noqa: ANN001
+            pass
+
+        def resolve_site_id(self) -> str:
+            return "site-id"
+
+        def list_drives(self, _site_id: str) -> list[dict]:
+            return [{"id": "drive-id", "name": "Archive"}]
+
+        def get_library_details(self, _drive_id: str) -> dict:
+            return {"id": "list-id", "displayName": "Archive", "list": {}}
+
+        def list_library_fields(self, _drive_id: str) -> list[dict]:
+            return []
+
+        def create_root_file(self, _drive_id: str, file_name: str, _data: bytes) -> dict:
+            operations.append(("create", file_name))
+            return {"id": "probe-id"}
+
+        def upload_file(self, _drive_id: str, item_id: str, _data: bytes) -> None:
+            operations.append(("update", item_id))
+
+        def delete_drive_item(self, _drive_id: str, item_id: str) -> None:
+            operations.append(("delete", item_id))
+
+    state_saved = {"called": False}
+
+    monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
+    monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
+    monkeypatch.setattr(main_module, "load_state", lambda _path: RunState(None, frozenset(), {}))
+    monkeypatch.setattr(
+        main_module,
+        "save_state",
+        lambda _path, _run_started, **_kwargs: state_saved.__setitem__("called", True),
+    )
+
+    rc = main_module.run(["--diagnose-libraries", "--write-probe", "--log-level", "INFO"])
+
+    assert rc == 0
+    assert [operation[0] for operation in operations] == ["create", "update", "delete"]
+    assert operations[0][1].startswith("_watermark_app_write_probe_")
+    assert operations[0][1].endswith(".txt")
+    assert operations[1] == ("update", "probe-id")
+    assert operations[2] == ("delete", "probe-id")
     assert not state_saved["called"]

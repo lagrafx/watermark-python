@@ -6,6 +6,7 @@ import argparse
 import logging
 import sys
 import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,7 +41,175 @@ def _build_parser() -> argparse.ArgumentParser:
             "libraries, then exit."
         ),
     )
+    parser.add_argument(
+        "--diagnose-libraries",
+        action="store_true",
+        help=(
+            "Run read-only diagnostics for targeted libraries, including library identity, "
+            "delta-state presence, watermark mapping, and required metadata fields."
+        ),
+    )
+    parser.add_argument(
+        "--write-probe",
+        action="store_true",
+        help=(
+            "With --diagnose-libraries, create, update, and delete a tiny temporary "
+            "probe file in each targeted library to verify write access."
+        ),
+    )
     return parser
+
+
+def _run_write_probe(graph: GraphClient, drive_id: str, drive_name: str) -> bool:
+    file_name = f"_watermark_app_write_probe_{uuid.uuid4().hex}.txt"
+    created_item_id: str | None = None
+    LOG.warning(
+        "  write_probe=enabled; temporary file will be created, updated, and deleted: %s",
+        file_name,
+    )
+    try:
+        created = graph.create_root_file(
+            drive_id,
+            file_name,
+            b"watermark app write probe - create\n",
+        )
+        created_item_id = created.get("id")
+        if not created_item_id:
+            LOG.error("  write_probe=create failed for %s: Graph returned no item id", drive_name)
+            return False
+        LOG.info("  write_probe=create ok item_id=%s", created_item_id)
+    except GraphClientError as exc:
+        LOG.error("  write_probe=create failed for %s: %s", drive_name, exc)
+        return False
+
+    try:
+        graph.upload_file(
+            drive_id,
+            created_item_id,
+            b"watermark app write probe - update\n",
+        )
+        LOG.info("  write_probe=update ok item_id=%s", created_item_id)
+    except GraphClientError as exc:
+        LOG.error("  write_probe=update failed for %s: %s", drive_name, exc)
+        try:
+            graph.delete_drive_item(drive_id, created_item_id)
+            LOG.info("  write_probe=cleanup delete ok after update failure")
+        except GraphClientError as cleanup_exc:
+            LOG.error(
+                "  write_probe=cleanup delete failed; remove manually if present: "
+                "%s (%s)",
+                file_name,
+                cleanup_exc,
+            )
+        return False
+
+    try:
+        graph.delete_drive_item(drive_id, created_item_id)
+        LOG.info("  write_probe=delete ok item_id=%s", created_item_id)
+    except GraphClientError as exc:
+        LOG.error(
+            "  write_probe=delete failed for %s; remove manually if present: %s (%s)",
+            drive_name,
+            file_name,
+            exc,
+        )
+        return False
+
+    LOG.info("  write_probe=passed for %s", drive_name)
+    return True
+
+
+def _log_library_diagnostics(
+    graph: GraphClient,
+    drives: list[dict],
+    config: AppConfig,
+    drive_delta_links: dict[str, str] | None,
+    write_probe: bool = False,
+) -> int:
+    failures = 0
+    delta_links = drive_delta_links or {}
+    for drive in drives:
+        drive_id = drive["id"]
+        drive_name = drive.get("name", drive_id)
+        drive_key = drive_name.lower()
+        watermark_path = config.library_watermark_paths.get(drive_key)
+
+        LOG.info("Diagnostic library: %s", drive_name)
+        LOG.info("The account or ID accessing this library is '%s'", graph.access_identity)
+        LOG.info("  drive_id=%s", drive_id)
+        LOG.info("  drive_webUrl=%s", drive.get("webUrl", "(not returned)"))
+        LOG.info("  delta_state=%s", "present" if drive_id in delta_links else "missing")
+        if watermark_path:
+            LOG.info("  watermark_mapping=present path=%s", watermark_path)
+        else:
+            LOG.warning("  watermark_mapping=missing for configured target library")
+            failures += 1
+
+        try:
+            details = graph.get_library_details(drive_id)
+            list_facet = details.get("list", {})
+            sharepoint_ids = details.get("sharepointIds", {})
+            LOG.info("  list_id=%s", details.get("id", "(not returned)"))
+            LOG.info("  list_displayName=%s", details.get("displayName", "(not returned)"))
+            LOG.info("  list_name=%s", details.get("name", "(not returned)"))
+            LOG.info("  list_webUrl=%s", details.get("webUrl", "(not returned)"))
+            LOG.info("  list_template=%s", list_facet.get("template", "(not returned)"))
+            LOG.info(
+                "  list_contentTypesEnabled=%s",
+                list_facet.get("contentTypesEnabled", "(not returned)"),
+            )
+            LOG.info("  list_hidden=%s", list_facet.get("hidden", "(not returned)"))
+            LOG.info("  sharepoint_listId=%s", sharepoint_ids.get("listId", "(not returned)"))
+        except GraphClientError as exc:
+            LOG.error("  library_details=failed: %s", exc)
+            failures += 1
+
+        try:
+            fields = graph.list_library_fields(drive_id)
+        except GraphClientError as exc:
+            LOG.error("  field_read=failed: %s", exc)
+            failures += 1
+            continue
+
+        required_editable = [
+            field
+            for field in fields
+            if field.get("required")
+            and not field.get("readOnly")
+            and not field.get("hidden")
+        ]
+        hidden_count = sum(1 for field in fields if field.get("hidden"))
+        read_only_count = sum(1 for field in fields if field.get("readOnly"))
+        LOG.info(
+            "  field_read=ok total=%s required_editable=%s readOnly=%s hidden=%s",
+            len(fields),
+            len(required_editable),
+            read_only_count,
+            hidden_count,
+        )
+        if required_editable:
+            LOG.warning(
+                "  required editable metadata fields may block uploads if SharePoint "
+                "requires values during file replacement:"
+            )
+            for field in sorted(required_editable, key=lambda f: (f.get("name") or "").lower()):
+                LOG.warning(
+                    "    field=%s displayName=%s type=%s",
+                    field.get("name", ""),
+                    field.get("displayName", ""),
+                    field.get("columnGroup", field.get("type", "(not returned)")),
+                )
+        else:
+            LOG.info("  required editable metadata fields: none detected")
+
+        if write_probe and not _run_write_probe(graph, drive_id, drive_name):
+            failures += 1
+
+    if failures:
+        LOG.error("Library diagnostics completed with %s warning/error condition(s).", failures)
+        return 1
+    LOG.info("Library diagnostics completed without detected configuration errors.")
+    return 0
 
 
 def run(argv: list[str] | None = None) -> int:
@@ -50,6 +219,10 @@ def run(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(message)s",
     )
     run_started = datetime.now(timezone.utc)
+    if args.write_probe and not args.diagnose_libraries:
+        LOG.error("--write-probe must be used with --diagnose-libraries.")
+        return 2
+
     config = AppConfig.from_env()
     state = load_state(config.state_file)
     LOG.info("Starting run (dry_run=%s)", args.dry_run)
@@ -121,6 +294,15 @@ def run(argv: list[str] | None = None) -> int:
                 )
         LOG.info("Field listing complete.")
         return 0
+
+    if args.diagnose_libraries:
+        return _log_library_diagnostics(
+            graph=graph,
+            drives=drives,
+            config=config,
+            drive_delta_links=state.drive_delta_links,
+            write_probe=args.write_probe,
+        )
 
     missing_mappings = [
         d.get("name", d["id"])

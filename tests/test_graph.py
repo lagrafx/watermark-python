@@ -1,3 +1,6 @@
+import base64
+import json
+
 import pytest
 
 from watermark_app.graph import GraphClient, GraphClientError
@@ -20,6 +23,11 @@ class _DummyResponse:
         if self._payload is None:
             raise ValueError("No JSON payload")
         return self._payload
+
+
+def _fake_jwt(claims: dict) -> str:
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    return f"header.{payload}.signature"
 
 
 def test_raise_for_error_adds_sites_selected_hint_on_403() -> None:
@@ -202,3 +210,95 @@ def test_list_library_fields_calls_expected_endpoint(monkeypatch: pytest.MonkeyP
 
     assert seen["url"] == "https://graph.microsoft.us/v1.0/drives/drive-id/list/columns"
     assert fields == [{"name": "RecordStatus", "displayName": "Record Status"}]
+
+
+def test_get_library_details_calls_expected_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = GraphClient.__new__(GraphClient)
+    client.config = type("Cfg", (), {"graph_base_url": "https://graph.microsoft.us/v1.0"})()
+    seen = {"url": None}
+
+    def fake_request(method, url, operation, timeout):  # noqa: ANN001
+        seen["url"] = url
+        assert method == "GET"
+        assert operation == "get library details"
+        assert timeout == 60
+        return _DummyResponse(
+            ok=True,
+            status_code=200,
+            payload={
+                "id": "list-id",
+                "displayName": "Archive",
+                "list": {"template": "documentLibrary"},
+            },
+        )
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    monkeypatch.setattr(client, "_raise_for_error", lambda _response, _operation: None)
+
+    details = client.get_library_details("drive-id")
+
+    assert seen["url"] == "https://graph.microsoft.us/v1.0/drives/drive-id/list"
+    assert details["displayName"] == "Archive"
+
+
+def test_create_root_file_calls_expected_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = GraphClient.__new__(GraphClient)
+    client.config = type("Cfg", (), {"graph_base_url": "https://graph.microsoft.us/v1.0"})()
+    seen = {"url": None, "headers": None, "data": None}
+
+    def fake_request(method, url, operation, headers, data, timeout):  # noqa: ANN001
+        seen["url"] = url
+        seen["headers"] = headers
+        seen["data"] = data
+        assert method == "PUT"
+        assert operation == "create root file"
+        assert timeout == 120
+        return _DummyResponse(ok=True, status_code=201, payload={"id": "probe-id"})
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    monkeypatch.setattr(client, "_raise_for_error", lambda _response, _operation: None)
+
+    created = client.create_root_file("drive-id", "probe.txt", b"probe")
+
+    assert seen["url"] == "https://graph.microsoft.us/v1.0/drives/drive-id/root:/probe.txt:/content"
+    assert seen["headers"] == {"Content-Type": "text/plain"}
+    assert seen["data"] == b"probe"
+    assert created == {"id": "probe-id"}
+
+
+def test_delete_drive_item_calls_expected_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = GraphClient.__new__(GraphClient)
+    client.config = type("Cfg", (), {"graph_base_url": "https://graph.microsoft.us/v1.0"})()
+    seen = {"url": None}
+
+    def fake_request(method, url, operation, timeout):  # noqa: ANN001
+        seen["url"] = url
+        assert method == "DELETE"
+        assert operation == "delete drive item"
+        assert timeout == 120
+        return _DummyResponse(ok=True, status_code=204, payload={})
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    monkeypatch.setattr(client, "_raise_for_error", lambda _response, _operation: None)
+
+    client.delete_drive_item("drive-id", "probe-id")
+
+    assert seen["url"] == "https://graph.microsoft.us/v1.0/drives/drive-id/items/probe-id"
+
+
+def test_access_identity_prefers_app_display_name() -> None:
+    client = GraphClient.__new__(GraphClient)
+    client.config = type("Cfg", (), {"client_id": "client-id"})()
+    client._token_claims = GraphClient._decode_token_claims(
+        _fake_jwt({"app_displayname": "Watermark - Python", "appid": "client-id"})
+    )
+
+    assert client.access_identity == "Watermark - Python"
+
+
+def test_access_identity_falls_back_to_client_id() -> None:
+    client = GraphClient.__new__(GraphClient)
+    client.config = type("Cfg", (), {"client_id": "client-id"})()
+    client._token_claims = {}
+
+    assert client.access_identity == "client-id"
