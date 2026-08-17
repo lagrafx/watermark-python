@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import logging
+import re
 import sys
 import tempfile
 import uuid
@@ -64,6 +65,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Process only the first eligible file, then stop. This is intended for "
             "production troubleshooting and does not save Graph delta links."
+        ),
+    )
+    parser.add_argument(
+        "--save-diagnostics",
+        nargs="?",
+        const="diagnostics",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Save per-file troubleshooting artifacts. For each attempted upload, "
+            "the app writes the original download, locally watermarked output, and "
+            "post-upload SharePoint download. If DIR is omitted, uses ./diagnostics."
         ),
     )
     return parser
@@ -195,15 +208,55 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _safe_path_part(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
+    return cleaned.strip("._") or "unnamed"
+
+
+def _diagnostic_attempt_dir(
+    diagnostics_root: Path | None,
+    run_started: datetime,
+    drive_name: str,
+    item_id: str,
+    file_name: str,
+) -> Path | None:
+    if diagnostics_root is None:
+        return None
+    timestamp = run_started.strftime("%Y%m%d-%H%M%S")
+    path = (
+        diagnostics_root
+        / timestamp
+        / _safe_path_part(drive_name)
+        / f"{_safe_path_part(file_name)}_{_safe_path_part(item_id)}"
+    )
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _write_diagnostic_bytes(
+    attempt_dir: Path | None,
+    label: str,
+    file_name: str,
+    data: bytes,
+) -> None:
+    if attempt_dir is None:
+        return
+    path = attempt_dir / f"{label}_{_safe_path_part(file_name)}"
+    path.write_bytes(data)
+    LOG.info("diagnostic_saved=%s bytes=%s", path, len(data))
+
+
 def _verify_uploaded_content(
     graph: GraphClient,
     drive_id: str,
     item_id: str,
     file_name: str,
     expected_bytes: bytes,
+    diagnostics_dir: Path | None = None,
 ) -> None:
     expected_hash = _sha256(expected_bytes)
     verify_bytes = graph.download_file(drive_id, item_id)
+    _write_diagnostic_bytes(diagnostics_dir, "03_sharepoint_after_upload", file_name, verify_bytes)
     actual_hash = _sha256(verify_bytes)
     if actual_hash != expected_hash:
         LOG.error(
@@ -337,6 +390,9 @@ def run(argv: list[str] | None = None) -> int:
 
     config = AppConfig.from_env()
     state = load_state(config.state_file)
+    diagnostics_root = (
+        Path(args.save_diagnostics).expanduser().resolve() if args.save_diagnostics else None
+    )
     LOG.info("Starting run (dry_run=%s)", args.dry_run)
     LOG.info("Authentication mode: %s", config.auth_mode)
     LOG.info("Target site: %s%s", config.site_hostname, config.site_path)
@@ -356,6 +412,8 @@ def run(argv: list[str] | None = None) -> int:
         "Loaded failed retry items: %s",
         sum(len(items) for items in (state.failed_items or {}).values()),
     )
+    if diagnostics_root:
+        LOG.info("Diagnostics output: %s", diagnostics_root)
 
     try:
         graph = GraphClient(config)
@@ -533,12 +591,31 @@ def run(argv: list[str] | None = None) -> int:
                 item_id = item["id"]
                 source_path = tmp_root / f"{item_id}_{file_name}"
                 output_path = tmp_root / f"{item_id}_watermarked_{file_name}"
+                attempt_diagnostics_dir = _diagnostic_attempt_dir(
+                    diagnostics_root,
+                    run_started,
+                    drive_name,
+                    item_id,
+                    file_name,
+                )
                 try:
                     file_bytes = graph.download_file(drive_id, item_id)
                     LOG.debug("Downloaded %s bytes for %s", len(file_bytes), file_name)
+                    _write_diagnostic_bytes(
+                        attempt_diagnostics_dir,
+                        "01_original_download",
+                        file_name,
+                        file_bytes,
+                    )
                     source_path.write_bytes(file_bytes)
                     apply_watermark(source_path, output_path, watermark_path)
                     output_bytes = output_path.read_bytes()
+                    _write_diagnostic_bytes(
+                        attempt_diagnostics_dir,
+                        "02_local_watermarked",
+                        file_name,
+                        output_bytes,
+                    )
                     LOG.debug(
                         "Watermarked %s: source_bytes=%s output_bytes=%s",
                         file_name,
@@ -554,6 +631,7 @@ def run(argv: list[str] | None = None) -> int:
                             item_id,
                             file_name,
                             output_bytes,
+                            attempt_diagnostics_dir,
                         )
                     else:
                         LOG.info("Dry run: would upload watermarked file: %s", file_name)

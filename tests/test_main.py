@@ -720,3 +720,67 @@ def test_run_fails_when_post_upload_verification_returns_different_bytes(
             }
         ]
     }
+
+
+def test_run_save_diagnostics_writes_original_output_and_post_upload_files(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    watermark = tmp_path / "wm.png"
+    watermark.write_bytes(b"not-used")
+    diagnostics_dir = tmp_path / "diagnostics"
+    state_holder = {"state": RunState(None, frozenset(), {})}
+    downloads = iter([b"original", b"sharepoint-after-upload"])
+
+    class DummyConfig:
+        auth_mode = "certificate"
+        state_file = tmp_path / "state.json"
+        library_names = ["Archive"]
+        library_watermark_paths = {"archive": watermark}
+        site_hostname = "contoso.sharepoint.com"
+        site_path = "/sites/Test"
+
+    class DummyGraphClient:
+        access_identity = "Watermark - Python"
+
+        def __init__(self, _config):  # noqa: ANN001
+            pass
+
+        def resolve_site_id(self) -> str:
+            return "site-id"
+
+        def list_drives(self, _site_id: str) -> list[dict]:
+            return [{"id": "drive-id", "name": "Archive"}]
+
+        def iter_changed_files(self, _drive_id: str, _delta_link: str | None = None):
+            return [
+                {"id": "doc-1", "name": "first.docx", "webUrl": "https://sp/first.docx"}
+            ], "delta-1"
+
+        def download_file(self, _drive_id: str, _item_id: str) -> bytes:
+            return next(downloads)
+
+        def upload_file(self, _drive_id: str, _item_id: str, _data: bytes) -> None:
+            pass
+
+    monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
+    monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
+    monkeypatch.setattr(main_module, "load_state", lambda _path: state_holder["state"])
+    monkeypatch.setattr(main_module, "save_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        main_module,
+        "apply_watermark",
+        lambda _source, output, _watermark: output.write_bytes(b"watermarked"),
+    )
+
+    rc = main_module.run(
+        ["--first-file-only", "--save-diagnostics", str(diagnostics_dir), "--log-level", "INFO"]
+    )
+
+    assert rc == 1
+    saved_files = {path.name: path.read_bytes() for path in diagnostics_dir.rglob("*.docx")}
+    assert saved_files == {
+        "01_original_download_first.docx": b"original",
+        "02_local_watermarked_first.docx": b"watermarked",
+        "03_sharepoint_after_upload_first.docx": b"sharepoint-after-upload",
+    }

@@ -35,12 +35,19 @@ def _watermark_word(source_path: Path, output_path: Path, watermark_png_path: Pa
     from docx.shared import Inches
 
     document = Document(str(source_path))
-    for section in document.sections:
-        header = section.header
+
+    def add_header_watermark(header) -> None:  # noqa: ANN001
         paragraph = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = paragraph.add_run()
         run.add_picture(str(watermark_png_path), width=Inches(6.0))
+
+    for section in document.sections:
+        add_header_watermark(section.header)
+        if getattr(section, "different_first_page_header_footer", False):
+            add_header_watermark(section.first_page_header)
+        if getattr(document.settings, "odd_and_even_pages_header_footer", False):
+            add_header_watermark(section.even_page_header)
     document.save(str(output_path))
 
 

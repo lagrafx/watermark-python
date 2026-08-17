@@ -55,6 +55,29 @@ Fix:
 - Run with `--dry-run --log-level DEBUG`.
 - Check state file timestamp and extension support.
 
+### Graph upload returns `200`, but the file is not visibly watermarked
+Cause:
+- The local watermark may not have been added to that specific document.
+- SharePoint or an Office service may be replacing/reprocessing the file after
+  Graph accepts the upload.
+- Word documents with first-page or odd/even headers can hide a header-only
+  watermark if the watermark is not applied to the active header type.
+
+Fix:
+- Use a build that applies Word watermarks to active primary, first-page, and
+  even-page headers.
+- Run a one-file diagnostic capture:
+  `.\watermark-app.exe --first-file-only --save-diagnostics C:\apps\watermark-app\diagnostics --log-level DEBUG`
+- Open the saved files:
+  `01_original_download_<file>`, `02_local_watermarked_<file>`, and
+  `03_sharepoint_after_upload_<file>`.
+- If `02_local_watermarked` is not visibly watermarked, the problem is local
+  watermark insertion for that document.
+- If `02_local_watermarked` is watermarked but `03_sharepoint_after_upload` is
+  not, the upload was accepted but SharePoint returned different content after
+  upload; investigate library automation, labels, records/retention, content
+  approval, required metadata, file handlers, or policy behavior.
+
 ## Supported Extensions (Current)
 - `.docx`, `.docm`
 - `.xlsx`, `.xlsm`

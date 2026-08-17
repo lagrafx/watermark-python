@@ -95,6 +95,10 @@ Safety behavior:
 - After each real upload, the app re-downloads the same file and compares SHA256
   hashes. A `post_upload_verify=passed` log means SharePoint returned the exact
   bytes the app uploaded.
+- For production troubleshooting, use `--first-file-only --save-diagnostics`.
+  This saves the original download, locally watermarked file, and post-upload
+  SharePoint download so you can see whether the watermark failed locally or was
+  lost after upload.
 
 For GCC High, set:
 
@@ -194,6 +198,23 @@ This is for production troubleshooting. It skips unsupported/already-processed
 files, processes the first eligible file, verifies the post-upload bytes, then
 stops. It does **not** advance Graph delta links, so unprocessed files remain
 eligible for future normal runs.
+
+Save troubleshooting artifacts for the attempted file:
+
+```powershell
+.\watermark-app.exe --first-file-only --save-diagnostics C:\apps\watermark-app\diagnostics --log-level DEBUG
+```
+
+Open the three saved files:
+
+- `01_original_download_<file>`
+- `02_local_watermarked_<file>`
+- `03_sharepoint_after_upload_<file>`
+
+If `02_local_watermarked` is not visibly watermarked, the issue is in the local
+watermarking logic for that document. If `02_local_watermarked` is visibly
+watermarked but `03_sharepoint_after_upload` is not, SharePoint or an Office
+service is changing/replacing the file after Graph accepts the upload.
 
 ## Schedule (Windows Task Scheduler)
 

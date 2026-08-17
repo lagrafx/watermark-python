@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-08-17
+
+### Added
+- New `--save-diagnostics [DIR]` troubleshooting flag.
+- Per-file diagnostic captures now include:
+  - `01_original_download_<file>`
+  - `02_local_watermarked_<file>`
+  - `03_sharepoint_after_upload_<file>`
+- Tests covering diagnostic artifact output.
+
+### Fixed
+- Word watermarking now also writes to active first-page and even-page headers,
+  not only the primary section header.
+
 ## 2026-08-10
 
 ### Added
