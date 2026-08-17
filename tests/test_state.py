@@ -11,10 +11,14 @@ def test_save_and_load_state(tmp_path):
         ts,
         {"abc", "def"},
         {"drive-1": "https://graph.microsoft.us/v1.0/drives/drive-1/root/delta?token=123"},
+        {"drive-1": [{"id": "failed-1", "name": "bad.docx", "webUrl": "https://sp/bad.docx"}]},
     )
     loaded = load_state(state_file)
     assert loaded.last_successful_run_utc == ts
     assert loaded.processed_item_ids == frozenset({"abc", "def"})
     assert loaded.drive_delta_links == {
         "drive-1": "https://graph.microsoft.us/v1.0/drives/drive-1/root/delta?token=123"
+    }
+    assert loaded.failed_items == {
+        "drive-1": [{"id": "failed-1", "name": "bad.docx", "webUrl": "https://sp/bad.docx"}]
     }

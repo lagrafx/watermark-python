@@ -220,6 +220,16 @@ class GraphClient:
         self._raise_for_error(response, "download file")
         return response.content
 
+    def get_drive_item(self, drive_id: str, item_id: str) -> dict:
+        response = self._request(
+            "GET",
+            f"{self.config.graph_base_url}/drives/{drive_id}/items/{item_id}",
+            operation="get drive item",
+            timeout=60,
+        )
+        self._raise_for_error(response, "get drive item")
+        return response.json()
+
     def upload_file(self, drive_id: str, item_id: str, data: bytes) -> None:
         response = self._request(
             "PUT",

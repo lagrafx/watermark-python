@@ -286,6 +286,27 @@ def test_delete_drive_item_calls_expected_endpoint(monkeypatch: pytest.MonkeyPat
     assert seen["url"] == "https://graph.microsoft.us/v1.0/drives/drive-id/items/probe-id"
 
 
+def test_get_drive_item_calls_expected_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = GraphClient.__new__(GraphClient)
+    client.config = type("Cfg", (), {"graph_base_url": "https://graph.microsoft.us/v1.0"})()
+    seen = {"url": None}
+
+    def fake_request(method, url, operation, timeout):  # noqa: ANN001
+        seen["url"] = url
+        assert method == "GET"
+        assert operation == "get drive item"
+        assert timeout == 60
+        return _DummyResponse(ok=True, status_code=200, payload={"id": "item-id", "file": {}})
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    monkeypatch.setattr(client, "_raise_for_error", lambda _response, _operation: None)
+
+    item = client.get_drive_item("drive-id", "item-id")
+
+    assert seen["url"] == "https://graph.microsoft.us/v1.0/drives/drive-id/items/item-id"
+    assert item == {"id": "item-id", "file": {}}
+
+
 def test_access_identity_prefers_app_display_name() -> None:
     client = GraphClient.__new__(GraphClient)
     client.config = type("Cfg", (), {"client_id": "client-id"})()

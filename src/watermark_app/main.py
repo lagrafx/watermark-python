@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import sys
 import tempfile
@@ -55,6 +56,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "With --diagnose-libraries, create, update, and delete a tiny temporary "
             "probe file in each targeted library to verify write access."
+        ),
+    )
+    parser.add_argument(
+        "--first-file-only",
+        action="store_true",
+        help=(
+            "Process only the first eligible file, then stop. This is intended for "
+            "production troubleshooting and does not save Graph delta links."
         ),
     )
     return parser
@@ -117,6 +126,105 @@ def _run_write_probe(graph: GraphClient, drive_id: str, drive_name: str) -> bool
 
     LOG.info("  write_probe=passed for %s", drive_name)
     return True
+
+
+def _retry_items_for_drive(
+    graph: GraphClient,
+    drive_id: str,
+    prior_failures: list[dict[str, str]],
+) -> list[dict]:
+    retry_items: list[dict] = []
+    for failed_item in prior_failures:
+        item_id = failed_item.get("id")
+        if not item_id:
+            continue
+        try:
+            item = graph.get_drive_item(drive_id, item_id)
+        except GraphClientError as exc:
+            LOG.warning(
+                "Previously failed item is no longer readable; dropping retry item_id=%s "
+                "name=%s error=%s",
+                item_id,
+                failed_item.get("name", ""),
+                exc,
+            )
+            continue
+        if "deleted" in item:
+            LOG.warning(
+                "Previously failed item appears deleted; dropping retry item_id=%s name=%s",
+                item_id,
+                failed_item.get("name", ""),
+            )
+            continue
+        if "file" not in item:
+            LOG.warning(
+                "Previously failed item is no longer a file; dropping retry item_id=%s name=%s",
+                item_id,
+                failed_item.get("name", ""),
+            )
+            continue
+        retry_items.append(item)
+    return retry_items
+
+
+def _merge_items(retry_items: list[dict], changed_items: list[dict]) -> list[dict]:
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for item in [*retry_items, *changed_items]:
+        item_id = item.get("id")
+        if not isinstance(item_id, str) or not item_id:
+            merged.append(item)
+            continue
+        if item_id in seen:
+            continue
+        seen.add(item_id)
+        merged.append(item)
+    return merged
+
+
+def _failed_item_record(item: dict, error: Exception) -> dict[str, str]:
+    return {
+        "id": str(item.get("id", "")),
+        "name": str(item.get("name", "")),
+        "webUrl": str(item.get("webUrl", "")),
+        "error": str(error),
+    }
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _verify_uploaded_content(
+    graph: GraphClient,
+    drive_id: str,
+    item_id: str,
+    file_name: str,
+    expected_bytes: bytes,
+) -> None:
+    expected_hash = _sha256(expected_bytes)
+    verify_bytes = graph.download_file(drive_id, item_id)
+    actual_hash = _sha256(verify_bytes)
+    if actual_hash != expected_hash:
+        LOG.error(
+            "post_upload_verify=failed file=%s expected_sha256=%s actual_sha256=%s "
+            "expected_bytes=%s actual_bytes=%s",
+            file_name,
+            expected_hash,
+            actual_hash,
+            len(expected_bytes),
+            len(verify_bytes),
+        )
+        raise RuntimeError(
+            "post-upload verification failed; SharePoint returned different bytes "
+            "than the app uploaded"
+        )
+    LOG.info(
+        "post_upload_verify=passed file=%s sha256=%s bytes=%s",
+        file_name,
+        actual_hash,
+        len(verify_bytes),
+    )
 
 
 def _log_library_diagnostics(
@@ -222,6 +330,10 @@ def run(argv: list[str] | None = None) -> int:
     if args.write_probe and not args.diagnose_libraries:
         LOG.error("--write-probe must be used with --diagnose-libraries.")
         return 2
+    if args.first_file_only and args.dry_run:
+        LOG.warning(
+            "--first-file-only is running with --dry-run; no uploads or state updates occur."
+        )
 
     config = AppConfig.from_env()
     state = load_state(config.state_file)
@@ -240,6 +352,10 @@ def run(argv: list[str] | None = None) -> int:
     LOG.info("Last successful run: %s", state.last_successful_run_utc or "none")
     LOG.info("Loaded processed item IDs: %s", len(state.processed_item_ids))
     LOG.info("Loaded drive delta links: %s", len(state.drive_delta_links or {}))
+    LOG.info(
+        "Loaded failed retry items: %s",
+        sum(len(items) for items in (state.failed_items or {}).values()),
+    )
 
     try:
         graph = GraphClient(config)
@@ -319,15 +435,28 @@ def run(argv: list[str] | None = None) -> int:
     processed = 0
     failed = 0
     skipped = 0
+    stop_after_first_attempt = False
 
     with tempfile.TemporaryDirectory(prefix="watermark_") as tmp_dir:
         tmp_root = Path(tmp_dir)
         new_delta_links = dict(state.drive_delta_links or {})
         processed_item_ids = set(state.processed_item_ids)
+        failed_items_by_drive: dict[str, list[dict[str, str]]] = {}
         for drive in drives:
+            if stop_after_first_attempt:
+                break
             drive_id = drive["id"]
             drive_name = drive.get("name", drive_id)
             watermark_path = config.library_watermark_paths[drive_name.lower()]
+            prior_failed_items = (state.failed_items or {}).get(drive_id, [])
+            retry_items = _retry_items_for_drive(graph, drive_id, prior_failed_items)
+            if prior_failed_items:
+                LOG.info(
+                    "Retry queue for %s: loaded=%s readable_files=%s",
+                    drive_name,
+                    len(prior_failed_items),
+                    len(retry_items),
+                )
             LOG.info(
                 "Scanning library: %s (drive_id=%s, watermark=%s)",
                 drive_name,
@@ -354,12 +483,25 @@ def run(argv: list[str] | None = None) -> int:
             except GraphClientError as exc:
                 LOG.error("Failed to list files in %s: %s", drive_name, exc)
                 failed += 1
+                if prior_failed_items:
+                    failed_items_by_drive[drive_id] = prior_failed_items
                 continue
+
+            items = _merge_items(retry_items, items)
+            if retry_items:
+                LOG.info(
+                    "Processing %s total candidate item(s) for %s after merging "
+                    "%s retry item(s) with Graph delta results",
+                    len(items),
+                    drive_name,
+                    len(retry_items),
+                )
 
             library_processed = 0
             library_unsupported = 0
             library_already_processed = 0
             library_failed = 0
+            library_failed_items: list[dict[str, str]] = []
             for item_index, item in enumerate(items, start=1):
                 if item_index == 1 or item_index % 250 == 0 or item_index == len(items):
                     LOG.info(
@@ -406,6 +548,13 @@ def run(argv: list[str] | None = None) -> int:
                     if not args.dry_run:
                         graph.upload_file(drive_id, item_id, output_bytes)
                         LOG.info("Uploaded watermarked file: %s", file_name)
+                        _verify_uploaded_content(
+                            graph,
+                            drive_id,
+                            item_id,
+                            file_name,
+                            output_bytes,
+                        )
                     else:
                         LOG.info("Dry run: would upload watermarked file: %s", file_name)
                     processed += 1
@@ -413,8 +562,27 @@ def run(argv: list[str] | None = None) -> int:
                     processed_item_ids.add(item_id)
                 except Exception as exc:  # noqa: BLE001
                     LOG.error("Failed file %s: %s", file_name, exc)
+                    library_failed_items.append(_failed_item_record(item, exc))
                     library_failed += 1
                     failed += 1
+                if args.first_file_only:
+                    LOG.info(
+                        "first_file_only=stopping after first eligible file attempt: %s",
+                        file_name,
+                    )
+                    stop_after_first_attempt = True
+                    break
+            if library_failed_items:
+                failed_items_by_drive[drive_id] = library_failed_items
+                LOG.error("Failed item report for %s:", drive_name)
+                for failed_item in library_failed_items:
+                    LOG.error(
+                        "  failed item_id=%s name=%s url=%s error=%s",
+                        failed_item.get("id", ""),
+                        failed_item.get("name", ""),
+                        failed_item.get("webUrl", ""),
+                        failed_item.get("error", ""),
+                    )
             LOG.info(
                 "Library summary for %s: changed=%s processed=%s skipped_already_processed=%s "
                 "skipped_unsupported=%s failed=%s",
@@ -426,33 +594,43 @@ def run(argv: list[str] | None = None) -> int:
                 library_failed,
             )
 
+    if args.dry_run:
+        LOG.info("Dry run complete; state file not updated.")
+    else:
+        LOG.info(
+            "Saving state to %s (processed_item_ids=%s, drive_delta_links=%s, "
+            "failed_retry_items=%s)",
+            config.state_file,
+            len(processed_item_ids),
+            0 if args.first_file_only else len(new_delta_links),
+            sum(len(items) for items in failed_items_by_drive.values()),
+        )
+        save_state(
+            config.state_file,
+            run_started,
+            processed_item_ids=processed_item_ids,
+            drive_delta_links=state.drive_delta_links if args.first_file_only else new_delta_links,
+            failed_items=failed_items_by_drive,
+        )
+        if args.first_file_only:
+            LOG.info(
+                "first_file_only=delta links were not advanced, so unprocessed files remain "
+                "eligible for normal future runs."
+            )
+        LOG.info(
+            "State saved: %s (exists=%s, bytes=%s)",
+            config.state_file,
+            config.state_file.exists(),
+            config.state_file.stat().st_size if config.state_file.exists() else 0,
+        )
+
     if failed == 0:
-        if args.dry_run:
-            LOG.info("Dry run complete; state file not updated.")
-        else:
-            LOG.info(
-                "Saving state to %s (processed_item_ids=%s, drive_delta_links=%s)",
-                config.state_file,
-                len(processed_item_ids),
-                len(new_delta_links),
-            )
-            save_state(
-                config.state_file,
-                run_started,
-                processed_item_ids=processed_item_ids,
-                drive_delta_links=new_delta_links,
-            )
-            LOG.info(
-                "State saved: %s (exists=%s, bytes=%s)",
-                config.state_file,
-                config.state_file.exists(),
-                config.state_file.stat().st_size if config.state_file.exists() else 0,
-            )
         LOG.info("Run successful. Processed=%s skipped=%s failed=%s", processed, skipped, failed)
         return 0
 
     LOG.error(
-        "Run completed with errors. Processed=%s skipped=%s failed=%s",
+        "Run completed with errors. Successful files were checkpointed; failed files "
+        "will be retried on the next run. Processed=%s skipped=%s failed=%s",
         processed,
         skipped,
         failed,

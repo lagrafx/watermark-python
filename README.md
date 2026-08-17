@@ -18,6 +18,8 @@ Scheduled SharePoint watermark automation for new Office/PDF documents.
 - Applies a PNG watermark to each file.
 - Uploads the updated file back to SharePoint.
 - Saves run state to a local JSON file.
+- Checkpoints successfully watermarked files even if a few files fail, and retries
+  failed files on the next run.
 
 ## Prerequisites
 
@@ -87,6 +89,12 @@ Safety behavior:
 
 - Every targeted library must have an explicit entry in `SP_LIBRARY_WATERMARKS`.
 - The run fails fast if any targeted library is missing a mapping, to prevent accidental watermarking.
+- If individual files fail, successful files and Graph delta links are still saved.
+  Failed files are written to `failed_items` in the state file and retried on the
+  next run.
+- After each real upload, the app re-downloads the same file and compares SHA256
+  hashes. A `post_upload_verify=passed` log means SharePoint returned the exact
+  bytes the app uploaded.
 
 For GCC High, set:
 
@@ -169,6 +177,23 @@ python -m watermark_app --dry-run --log-level DEBUG
 ```
 
 Note: `--dry-run` does not update the run-state file.
+
+Process only the first eligible file:
+
+```powershell
+.\watermark-app.exe --first-file-only --log-level DEBUG
+```
+
+Source repo equivalent:
+
+```powershell
+python -m watermark_app --first-file-only --log-level DEBUG
+```
+
+This is for production troubleshooting. It skips unsupported/already-processed
+files, processes the first eligible file, verifies the post-upload bytes, then
+stops. It does **not** advance Graph delta links, so unprocessed files remain
+eligible for future normal runs.
 
 ## Schedule (Windows Task Scheduler)
 
