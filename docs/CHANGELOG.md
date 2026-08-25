@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-08-25
+
+### Changed
+- Replaced the fragile Word DrawingML anchor approach with a first-page-only VML
+  watermark pattern to avoid corrupted documents and repeated page watermarks.
+- Office post-upload verification now tolerates SharePoint package rewrites only
+  when the app-added watermark media survives in the returned Office package.
+
+### Fixed
+- Word repair cleanup now recognizes any prior `watermark-python|...` tag,
+  including the rejected `behind-text-v2` build.
+- Excel files no longer fail solely because SharePoint rewrites `.xlsx` package
+  bytes after upload.
+
 ## 2026-08-24
 
 ### Added

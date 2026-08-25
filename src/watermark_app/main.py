@@ -9,7 +9,9 @@ import re
 import sys
 import tempfile
 import uuid
+import zipfile
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 
 from watermark_app.config import AppConfig
@@ -234,6 +236,34 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _office_media_hashes(file_name: str, data: bytes) -> set[str]:
+    ext = Path(file_name).suffix.lower()
+    media_prefixes = {
+        ".docx": "word/media/",
+        ".docm": "word/media/",
+        ".xlsx": "xl/media/",
+        ".xlsm": "xl/media/",
+        ".pptx": "ppt/media/",
+        ".pptm": "ppt/media/",
+    }
+    media_prefix = media_prefixes.get(ext)
+    if not media_prefix:
+        return set()
+    try:
+        with zipfile.ZipFile(BytesIO(data)) as package:
+            return {
+                _sha256(package.read(name))
+                for name in package.namelist()
+                if name.startswith(media_prefix)
+            }
+    except zipfile.BadZipFile:
+        return set()
+
+
+def _is_office_file(file_name: str) -> bool:
+    return Path(file_name).suffix.lower() in {".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm"}
+
+
 def _safe_path_part(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
     return cleaned.strip("._") or "unnamed"
@@ -277,6 +307,7 @@ def _verify_uploaded_content(
     drive_id: str,
     item_id: str,
     file_name: str,
+    original_bytes: bytes,
     expected_bytes: bytes,
     diagnostics_dir: Path | None = None,
 ) -> None:
@@ -285,6 +316,32 @@ def _verify_uploaded_content(
     _write_diagnostic_bytes(diagnostics_dir, "03_sharepoint_after_upload", file_name, verify_bytes)
     actual_hash = _sha256(verify_bytes)
     if actual_hash != expected_hash:
+        if _is_office_file(file_name):
+            original_media_hashes = _office_media_hashes(file_name, original_bytes)
+            expected_media_hashes = _office_media_hashes(file_name, expected_bytes)
+            actual_media_hashes = _office_media_hashes(file_name, verify_bytes)
+            added_expected_media_hashes = expected_media_hashes - original_media_hashes
+            shared_added_media_hashes = added_expected_media_hashes & actual_media_hashes
+            LOG.warning(
+                "post_upload_verify=office_package_rewritten file=%s expected_sha256=%s "
+                "actual_sha256=%s expected_bytes=%s actual_bytes=%s "
+                "added_media_items=%s shared_added_media_items=%s",
+                file_name,
+                expected_hash,
+                actual_hash,
+                len(expected_bytes),
+                len(verify_bytes),
+                len(added_expected_media_hashes),
+                len(shared_added_media_hashes),
+            )
+            if shared_added_media_hashes:
+                LOG.info(
+                    "post_upload_verify=passed_via_office_media file=%s "
+                    "shared_added_media_items=%s",
+                    file_name,
+                    len(shared_added_media_hashes),
+                )
+                return
         LOG.error(
             "post_upload_verify=failed file=%s expected_sha256=%s actual_sha256=%s "
             "expected_bytes=%s actual_bytes=%s",
@@ -705,6 +762,7 @@ def run(argv: list[str] | None = None) -> int:
                             drive_id,
                             item_id,
                             file_name,
+                            file_bytes,
                             output_bytes,
                             attempt_diagnostics_dir,
                         )

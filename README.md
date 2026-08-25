@@ -92,9 +92,10 @@ Safety behavior:
 - If individual files fail, successful files and Graph delta links are still saved.
   Failed files are written to `failed_items` in the state file and retried on the
   next run.
-- After each real upload, the app re-downloads the same file and compares SHA256
-  hashes. A `post_upload_verify=passed` log means SharePoint returned the exact
-  bytes the app uploaded.
+- After each real upload, the app re-downloads the same file and verifies the
+  result. Exact byte matches pass immediately. For Office files, SharePoint may
+  rewrite package bytes, so byte mismatches are accepted only when the
+  watermark media added by the app is still present in the post-upload file.
 - For production troubleshooting, use `--first-file-only --save-diagnostics`.
   This saves the original download, locally watermarked file, and post-upload
   SharePoint download so you can see whether the watermark failed locally or was
@@ -226,6 +227,7 @@ for future normal scheduled runs.
 For Word repair, legacy cleanup is intentionally narrow: it removes tagged
 watermarks from current builds and old header images only when they are about
 the previous 6-inch watermark size and match the configured watermark PNG bytes.
+The replacement Word watermark is first-page-only.
 This reduces the risk of removing unrelated customer header images or logos.
 
 Save troubleshooting artifacts for the attempted file:

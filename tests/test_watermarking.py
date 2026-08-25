@@ -11,7 +11,7 @@ def _make_watermark(path: Path) -> None:
     image.save(path)
 
 
-def test_word_watermark_is_inserted_as_behind_text_anchor(tmp_path: Path) -> None:
+def test_word_watermark_is_inserted_as_first_page_vml_watermark(tmp_path: Path) -> None:
     from docx import Document
 
     source = tmp_path / "source.docx"
@@ -24,6 +24,7 @@ def test_word_watermark_is_inserted_as_behind_text_anchor(tmp_path: Path) -> Non
     document.save(source)
 
     apply_watermark(source, output, watermark)
+    Document(str(output))
 
     with zipfile.ZipFile(output) as package:
         headers = [
@@ -33,9 +34,9 @@ def test_word_watermark_is_inserted_as_behind_text_anchor(tmp_path: Path) -> Non
         ]
 
     assert headers
-    assert any("<wp:anchor" in header for header in headers)
-    assert any('behindDoc="1"' in header for header in headers)
-    assert any("watermark-python|behind-text-v2" in header for header in headers)
+    assert any("<v:shape" in header for header in headers)
+    assert sum(header.count("WatermarkPythonFirstPageBehindText") for header in headers) == 1
+    assert any("watermark-python|first-page-behind-text-v3" in header for header in headers)
 
 
 def test_word_repair_removes_matching_legacy_watermark_but_keeps_header_logo(
@@ -61,17 +62,18 @@ def test_word_repair_removes_matching_legacy_watermark_but_keeps_header_logo(
     document.save(source)
 
     apply_watermark(source, output, watermark)
+    Document(str(output))
 
     with zipfile.ZipFile(output) as package:
-        header_xml = next(
+        header_xml = "\n".join(
             package.read(name).decode("utf-8")
             for name in package.namelist()
             if name.startswith("word/header") and name.endswith(".xml")
         )
 
     assert header_xml.count("<wp:inline") == 1
-    assert header_xml.count("<wp:anchor") == 1
-    assert "watermark-python|behind-text-v2" in header_xml
+    assert header_xml.count("WatermarkPythonFirstPageBehindText") == 1
+    assert "watermark-python|first-page-behind-text-v3" in header_xml
 
 
 def test_powerpoint_watermark_is_first_slide_shape_after_group_properties(
@@ -97,7 +99,7 @@ def test_powerpoint_watermark_is_first_slide_shape_after_group_properties(
     pic_index = slide_xml.index("<p:pic>")
     text_box_index = slide_xml.index("<p:sp>")
     assert pic_index < text_box_index
-    assert "watermark-python|behind-text-v2" in slide_xml
+    assert "watermark-python|first-page-behind-text-v3" in slide_xml
 
 
 def test_excel_embedded_watermark_png_is_semi_transparent(tmp_path: Path) -> None:

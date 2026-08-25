@@ -1,9 +1,19 @@
+import zipfile
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 
 from watermark_app import main as main_module
 from watermark_app.state import RunState, should_process
 from watermark_app.watermarking import is_supported_extension
+
+
+def _zip_bytes(files: dict[str, bytes]) -> bytes:
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as package:
+        for name, data in files.items():
+            package.writestr(name, data)
+    return buffer.getvalue()
 
 
 def test_supported_extensions() -> None:
@@ -907,6 +917,150 @@ def test_run_fails_when_post_upload_verification_returns_different_bytes(
             }
         ]
     }
+
+
+def test_run_accepts_office_post_upload_package_rewrite_when_watermark_media_survives(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    watermark = tmp_path / "wm.png"
+    watermark.write_bytes(b"not-used")
+    original_bytes = _zip_bytes({"xl/workbook.xml": b"workbook"})
+    output_bytes = _zip_bytes(
+        {"xl/workbook.xml": b"rewritten-local", "xl/media/image1.png": b"watermark"}
+    )
+    returned_bytes = _zip_bytes(
+        {"xl/workbook.xml": b"rewritten-sharepoint", "xl/media/image99.png": b"watermark"}
+    )
+    state_holder = {"state": RunState(None, frozenset(), {})}
+
+    class DummyConfig:
+        auth_mode = "certificate"
+        state_file = tmp_path / "state.json"
+        library_names = ["Archive"]
+        library_watermark_paths = {"archive": watermark}
+        site_hostname = "contoso.sharepoint.com"
+        site_path = "/sites/Test"
+
+    class DummyGraphClient:
+        access_identity = "Watermark - Python"
+
+        def __init__(self, _config):  # noqa: ANN001
+            pass
+
+        def resolve_site_id(self) -> str:
+            return "site-id"
+
+        def list_drives(self, _site_id: str) -> list[dict]:
+            return [{"id": "drive-id", "name": "Archive"}]
+
+        def iter_changed_files(self, _drive_id: str, _delta_link: str | None = None):
+            return [
+                {"id": "xlsx-1", "name": "book.xlsx", "webUrl": "https://sp/book.xlsx"}
+            ], "delta-1"
+
+        def download_file(self, _drive_id: str, _item_id: str) -> bytes:
+            if not state_holder.get("uploaded"):
+                return original_bytes
+            return returned_bytes
+
+        def upload_file(self, _drive_id: str, _item_id: str, _data: bytes) -> None:
+            state_holder["uploaded"] = True
+
+    def fake_save_state(_path, run_started, **kwargs):  # noqa: ANN001
+        state_holder["state"] = RunState(
+            run_started,
+            frozenset(kwargs.get("processed_item_ids") or set()),
+            dict(kwargs.get("drive_delta_links") or {}),
+            dict(kwargs.get("failed_items") or {}),
+        )
+
+    monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
+    monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
+    monkeypatch.setattr(main_module, "load_state", lambda _path: state_holder["state"])
+    monkeypatch.setattr(main_module, "save_state", fake_save_state)
+    monkeypatch.setattr(
+        main_module,
+        "apply_watermark",
+        lambda _source, output, _watermark: output.write_bytes(output_bytes),
+    )
+
+    rc = main_module.run(["--log-level", "INFO"])
+
+    assert rc == 0
+    assert state_holder["state"].processed_item_ids == frozenset({"xlsx-1"})
+    assert state_holder["state"].failed_items == {}
+
+
+def test_run_rejects_office_post_upload_package_rewrite_when_watermark_media_is_missing(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    watermark = tmp_path / "wm.png"
+    watermark.write_bytes(b"not-used")
+    original_bytes = _zip_bytes({"xl/workbook.xml": b"workbook"})
+    output_bytes = _zip_bytes(
+        {"xl/workbook.xml": b"rewritten-local", "xl/media/image1.png": b"watermark"}
+    )
+    returned_bytes = _zip_bytes({"xl/workbook.xml": b"rewritten-sharepoint"})
+    state_holder = {"state": RunState(None, frozenset(), {})}
+
+    class DummyConfig:
+        auth_mode = "certificate"
+        state_file = tmp_path / "state.json"
+        library_names = ["Archive"]
+        library_watermark_paths = {"archive": watermark}
+        site_hostname = "contoso.sharepoint.com"
+        site_path = "/sites/Test"
+
+    class DummyGraphClient:
+        access_identity = "Watermark - Python"
+
+        def __init__(self, _config):  # noqa: ANN001
+            pass
+
+        def resolve_site_id(self) -> str:
+            return "site-id"
+
+        def list_drives(self, _site_id: str) -> list[dict]:
+            return [{"id": "drive-id", "name": "Archive"}]
+
+        def iter_changed_files(self, _drive_id: str, _delta_link: str | None = None):
+            return [
+                {"id": "xlsx-1", "name": "book.xlsx", "webUrl": "https://sp/book.xlsx"}
+            ], "delta-1"
+
+        def download_file(self, _drive_id: str, _item_id: str) -> bytes:
+            if not state_holder.get("uploaded"):
+                return original_bytes
+            return returned_bytes
+
+        def upload_file(self, _drive_id: str, _item_id: str, _data: bytes) -> None:
+            state_holder["uploaded"] = True
+
+    def fake_save_state(_path, run_started, **kwargs):  # noqa: ANN001
+        state_holder["state"] = RunState(
+            run_started,
+            frozenset(kwargs.get("processed_item_ids") or set()),
+            dict(kwargs.get("drive_delta_links") or {}),
+            dict(kwargs.get("failed_items") or {}),
+        )
+
+    monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
+    monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
+    monkeypatch.setattr(main_module, "load_state", lambda _path: state_holder["state"])
+    monkeypatch.setattr(main_module, "save_state", fake_save_state)
+    monkeypatch.setattr(
+        main_module,
+        "apply_watermark",
+        lambda _source, output, _watermark: output.write_bytes(output_bytes),
+    )
+
+    rc = main_module.run(["--log-level", "INFO"])
+
+    assert rc == 1
+    assert state_holder["state"].processed_item_ids == frozenset()
+    assert state_holder["state"].failed_items["drive-id"][0]["name"] == "book.xlsx"
 
 
 def test_run_save_diagnostics_writes_original_output_and_post_upload_files(

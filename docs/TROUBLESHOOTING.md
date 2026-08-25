@@ -60,12 +60,11 @@ Cause:
 - The local watermark may not have been added to that specific document.
 - SharePoint or an Office service may be replacing/reprocessing the file after
   Graph accepts the upload.
-- Word documents with first-page or odd/even headers can hide a header-only
-  watermark if the watermark is not applied to the active header type.
+- Older builds inserted Word watermarks as normal header images or fragile
+  DrawingML anchors, which can appear in the wrong location or corrupt files.
 
 Fix:
-- Use a build that applies Word watermarks to active primary, first-page, and
-  even-page headers as behind-text page watermarks.
+- Use a build that applies Word watermarks as first-page-only VML watermarks.
 - Run a one-file diagnostic capture:
   `.\watermark-app.exe --first-file-only --save-diagnostics C:\apps\watermark-app\diagnostics --log-level DEBUG`
 - Open the saved files:
@@ -93,6 +92,8 @@ Fix:
 - Word legacy cleanup is intentionally narrow: it removes tagged watermarks from
   current builds and old header images only when they are about the prior 6-inch
   watermark size and match the configured watermark PNG bytes.
+- Office upload verification accepts SharePoint package rewrites only when the
+  watermark media added by the app is still present after re-download.
 
 ## Supported Extensions (Current)
 - `.docx`, `.docm`

@@ -6,10 +6,12 @@ import hashlib
 import io
 import tempfile
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 SUPPORTED_EXTENSIONS = {".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm", ".pdf"}
 WATERMARK_OPACITY = 0.35
-WATERMARK_MARKER = "watermark-python|behind-text-v2"
+WATERMARK_APP_MARKER = "watermark-python|"
+WATERMARK_MARKER = "watermark-python|first-page-behind-text-v3"
 EMU_PER_INCH = 914400
 LEGACY_WORD_WATERMARK_WIDTH_EMU = 6 * EMU_PER_INCH
 WORD_WATERMARK_WIDTH_INCHES = 6.5
@@ -61,9 +63,7 @@ def _watermark_word(
     legacy_watermark_png_path: Path,
 ) -> None:
     from docx import Document
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
-    from docx.shared import Inches
+    from docx.oxml import parse_xml
 
     document = Document(str(source_path))
     removable_image_hashes = {
@@ -71,56 +71,44 @@ def _watermark_word(
         _sha256_bytes(watermark_png_path.read_bytes()),
     }
 
-    def add_header_watermark(header) -> None:  # noqa: ANN001
+    def remove_header_watermarks(header) -> None:  # noqa: ANN001
         _remove_existing_header_images(header, removable_image_hashes)
-        paragraph = header.add_paragraph()
-        run = paragraph.add_run()
-        run.add_picture(str(watermark_png_path), width=Inches(WORD_WATERMARK_WIDTH_INCHES))
-        drawing = run._r.xpath("./w:drawing")[0]  # noqa: SLF001
-        inline = drawing.xpath("./wp:inline")[0]
-        doc_pr = inline.xpath("./wp:docPr")[0]
-        doc_pr.set("name", WATERMARK_MARKER)
-        doc_pr.set("descr", WATERMARK_MARKER)
-        inline.tag = qn("wp:anchor")
-        inline.set("distT", "0")
-        inline.set("distB", "0")
-        inline.set("distL", "0")
-        inline.set("distR", "0")
-        inline.set("simplePos", "0")
-        inline.set("relativeHeight", "251659264")
-        inline.set("behindDoc", "1")
-        inline.set("locked", "0")
-        inline.set("layoutInCell", "1")
-        inline.set("allowOverlap", "1")
 
-        simple_pos = OxmlElement("wp:simplePos")
-        simple_pos.set("x", "0")
-        simple_pos.set("y", "0")
-
-        position_h = OxmlElement("wp:positionH")
-        position_h.set("relativeFrom", "page")
-        align_h = OxmlElement("wp:align")
-        align_h.text = "center"
-        position_h.append(align_h)
-
-        position_v = OxmlElement("wp:positionV")
-        position_v.set("relativeFrom", "page")
-        align_v = OxmlElement("wp:align")
-        align_v.text = "center"
-        position_v.append(align_v)
-
-        wrap_none = OxmlElement("wp:wrapNone")
-        inline.insert(0, simple_pos)
-        inline.insert(1, position_h)
-        inline.insert(2, position_v)
-        inline.insert(3, wrap_none)
+    def add_first_page_watermark(header) -> None:  # noqa: ANN001
+        r_id, image = header.part.get_or_add_image(str(watermark_png_path))
+        width_points = WORD_WATERMARK_WIDTH_INCHES * 72
+        height_points = width_points * image.px_height / image.px_width
+        marker = escape(WATERMARK_MARKER)
+        shape_id = "WatermarkPythonFirstPageBehindText"
+        xml = f"""
+<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+     xmlns:v="urn:schemas-microsoft-com:vml"
+     xmlns:o="urn:schemas-microsoft-com:office:office"
+     xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:r>
+    <w:pict>
+      <v:shape id="{shape_id}" o:spid="_x0000_s2050" type="#_x0000_t75"
+        alt="{marker}"
+        style="position:absolute;margin-left:0;margin-top:0;width:{width_points:.2f}pt;
+        height:{height_points:.2f}pt;rotation:315;z-index:-251654144;
+        mso-position-horizontal:center;mso-position-horizontal-relative:page;
+        mso-position-vertical:center;mso-position-vertical-relative:page"
+        o:allowincell="f" stroked="f">
+        <v:imagedata r:id="{r_id}" o:title="{marker}"/>
+      </v:shape>
+    </w:pict>
+  </w:r>
+</w:p>
+"""
+        header._element.append(parse_xml(xml))  # noqa: SLF001
 
     for section in document.sections:
-        add_header_watermark(section.header)
-        if getattr(section, "different_first_page_header_footer", False):
-            add_header_watermark(section.first_page_header)
+        remove_header_watermarks(section.header)
+        section.different_first_page_header_footer = True
+        remove_header_watermarks(section.first_page_header)
+        add_first_page_watermark(section.first_page_header)
         if getattr(document.settings, "odd_and_even_pages_header_footer", False):
-            add_header_watermark(section.even_page_header)
+            remove_header_watermarks(section.even_page_header)
     document.save(str(output_path))
 
 
@@ -144,9 +132,8 @@ def _remove_existing_header_images(
 
 
 def _is_tagged_watermark_run(run) -> bool:  # noqa: ANN001
-    for doc_pr in run._r.xpath(".//wp:docPr | .//pic:cNvPr"):  # noqa: SLF001
-        values = [doc_pr.get("name", ""), doc_pr.get("descr", ""), doc_pr.get("title", "")]
-        if any(WATERMARK_MARKER in value for value in values):
+    for element in run._element.iter():  # noqa: SLF001
+        if any(WATERMARK_APP_MARKER in value for value in element.attrib.values()):
             return True
     return False
 
