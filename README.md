@@ -199,6 +199,35 @@ files, processes the first eligible file, verifies the post-upload bytes, then
 stops. It does **not** advance Graph delta links, so unprocessed files remain
 eligible for future normal runs.
 
+Process only one file type:
+
+```powershell
+.\watermark-app.exe --file-extension .docx --first-file-only --log-level DEBUG
+```
+
+Process one specifically named file:
+
+```powershell
+.\watermark-app.exe --repair-watermarks --file-name "Copied Archive Test.docx" --save-diagnostics C:\apps\watermark-app\diagnostics --log-level DEBUG
+```
+
+Repair files that were already processed by an older watermark layout:
+
+```powershell
+.\watermark-app.exe --repair-watermarks --file-extension .docx --first-file-only --save-diagnostics C:\apps\watermark-app\diagnostics --log-level DEBUG
+```
+
+After one-file tests pass for each supported type, remove `--first-file-only`
+and run the repair mode for the targeted library. Repair mode scans the targeted
+library instead of using only Graph delta changes, reprocesses supported files
+even if they are already in the state file, and preserves existing delta tokens
+for future normal scheduled runs.
+
+For Word repair, legacy cleanup is intentionally narrow: it removes tagged
+watermarks from current builds and old header images only when they are about
+the previous 6-inch watermark size and match the configured watermark PNG bytes.
+This reduces the risk of removing unrelated customer header images or logos.
+
 Save troubleshooting artifacts for the attempted file:
 
 ```powershell

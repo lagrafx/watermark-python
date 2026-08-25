@@ -65,7 +65,7 @@ Cause:
 
 Fix:
 - Use a build that applies Word watermarks to active primary, first-page, and
-  even-page headers.
+  even-page headers as behind-text page watermarks.
 - Run a one-file diagnostic capture:
   `.\watermark-app.exe --first-file-only --save-diagnostics C:\apps\watermark-app\diagnostics --log-level DEBUG`
 - Open the saved files:
@@ -77,6 +77,22 @@ Fix:
   not, the upload was accepted but SharePoint returned different content after
   upload; investigate library automation, labels, records/retention, content
   approval, required metadata, file handlers, or policy behavior.
+
+### Already-watermarked files need the new placement/style
+Cause:
+- The app state file already contains those SharePoint item IDs, so normal runs
+  skip them to avoid repeated version churn.
+
+Fix:
+- Test one file type at a time first:
+  `.\watermark-app.exe --repair-watermarks --file-extension .docx --first-file-only --save-diagnostics C:\apps\watermark-app\diagnostics --log-level DEBUG`
+- Repeat the one-file test for `.xlsx`, `.pptx`, and `.pdf` as needed.
+- After visual approval, run repair mode without `--first-file-only`.
+- Repair mode does not advance Graph delta tokens, so normal future runs keep
+  their incremental behavior.
+- Word legacy cleanup is intentionally narrow: it removes tagged watermarks from
+  current builds and old header images only when they are about the prior 6-inch
+  watermark size and match the configured watermark PNG bytes.
 
 ## Supported Extensions (Current)
 - `.docx`, `.docm`

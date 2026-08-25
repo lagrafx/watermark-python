@@ -237,6 +237,193 @@ def test_run_processes_only_new_files_based_on_delta(monkeypatch, tmp_path: Path
     assert state_holder["state"].processed_item_ids == frozenset({"f1", "f2", "f3"})
 
 
+def test_run_repair_watermarks_reprocesses_checkpointed_files_without_advancing_delta(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    watermark = tmp_path / "wm.png"
+    watermark.write_bytes(b"not-used")
+    uploads: list[str] = []
+    stored_bytes = {"f1": b"old"}
+    state_holder = {"state": RunState(None, frozenset({"f1"}), {"drive-id": "delta-old"})}
+
+    class DummyConfig:
+        auth_mode = "certificate"
+        state_file = tmp_path / "state.json"
+        library_names = ["Archive"]
+        library_watermark_paths = {"archive": watermark}
+        site_hostname = "contoso.sharepoint.com"
+        site_path = "/sites/Test"
+
+    class DummyGraphClient:
+        access_identity = "Watermark - Python"
+
+        def __init__(self, _config):  # noqa: ANN001
+            pass
+
+        def resolve_site_id(self) -> str:
+            return "site-id"
+
+        def list_drives(self, _site_id: str) -> list[dict]:
+            return [{"id": "drive-id", "name": "Archive"}]
+
+        def iter_files(self, _drive_id: str) -> list[dict]:
+            return [
+                {"id": "f1", "name": "already.docx", "webUrl": "https://sp/already.docx"},
+                {"id": "txt-1", "name": "notes.txt", "webUrl": "https://sp/notes.txt"},
+            ]
+
+        def download_file(self, _drive_id: str, item_id: str) -> bytes:
+            return stored_bytes[item_id]
+
+        def upload_file(self, _drive_id: str, item_id: str, data: bytes) -> None:
+            uploads.append(item_id)
+            stored_bytes[item_id] = data
+
+    def fake_save_state(_path, run_started, **kwargs):  # noqa: ANN001
+        state_holder["state"] = RunState(
+            run_started,
+            frozenset(kwargs.get("processed_item_ids") or set()),
+            dict(kwargs.get("drive_delta_links") or {}),
+            dict(kwargs.get("failed_items") or {}),
+        )
+
+    monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
+    monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
+    monkeypatch.setattr(main_module, "load_state", lambda _path: state_holder["state"])
+    monkeypatch.setattr(main_module, "save_state", fake_save_state)
+    monkeypatch.setattr(main_module, "apply_watermark", lambda _s, out, _w: out.write_bytes(b"wm"))
+
+    rc = main_module.run(["--repair-watermarks", "--log-level", "INFO"])
+
+    assert rc == 0
+    assert uploads == ["f1"]
+    assert state_holder["state"].processed_item_ids == frozenset({"f1"})
+    assert state_holder["state"].drive_delta_links == {"drive-id": "delta-old"}
+
+
+def test_run_file_extension_filter_limits_processed_files(monkeypatch, tmp_path: Path) -> None:
+    watermark = tmp_path / "wm.png"
+    watermark.write_bytes(b"not-used")
+    uploads: list[str] = []
+    stored_bytes: dict[str, bytes] = {}
+    state_holder = {"state": RunState(None, frozenset(), {})}
+
+    class DummyConfig:
+        auth_mode = "certificate"
+        state_file = tmp_path / "state.json"
+        library_names = ["Archive"]
+        library_watermark_paths = {"archive": watermark}
+        site_hostname = "contoso.sharepoint.com"
+        site_path = "/sites/Test"
+
+    class DummyGraphClient:
+        access_identity = "Watermark - Python"
+
+        def __init__(self, _config):  # noqa: ANN001
+            pass
+
+        def resolve_site_id(self) -> str:
+            return "site-id"
+
+        def list_drives(self, _site_id: str) -> list[dict]:
+            return [{"id": "drive-id", "name": "Archive"}]
+
+        def iter_changed_files(self, _drive_id: str, _delta_link: str | None = None):
+            return [
+                {"id": "doc-1", "name": "first.docx", "webUrl": "https://sp/first.docx"},
+                {"id": "pdf-1", "name": "second.pdf", "webUrl": "https://sp/second.pdf"},
+            ], "delta-1"
+
+        def download_file(self, _drive_id: str, item_id: str) -> bytes:
+            return stored_bytes.get(item_id, b"fake")
+
+        def upload_file(self, _drive_id: str, item_id: str, data: bytes) -> None:
+            uploads.append(item_id)
+            stored_bytes[item_id] = data
+
+    def fake_save_state(_path, run_started, **kwargs):  # noqa: ANN001
+        state_holder["state"] = RunState(
+            run_started,
+            frozenset(kwargs.get("processed_item_ids") or set()),
+            dict(kwargs.get("drive_delta_links") or {}),
+            dict(kwargs.get("failed_items") or {}),
+        )
+
+    monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
+    monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
+    monkeypatch.setattr(main_module, "load_state", lambda _path: state_holder["state"])
+    monkeypatch.setattr(main_module, "save_state", fake_save_state)
+    monkeypatch.setattr(main_module, "apply_watermark", lambda _s, out, _w: out.write_bytes(b"wm"))
+
+    rc = main_module.run(["--file-extension", "pdf", "--log-level", "INFO"])
+
+    assert rc == 0
+    assert uploads == ["pdf-1"]
+    assert state_holder["state"].processed_item_ids == frozenset({"pdf-1"})
+
+
+def test_run_file_name_filter_limits_processed_files(monkeypatch, tmp_path: Path) -> None:
+    watermark = tmp_path / "wm.png"
+    watermark.write_bytes(b"not-used")
+    uploads: list[str] = []
+    stored_bytes: dict[str, bytes] = {}
+    state_holder = {"state": RunState(None, frozenset(), {})}
+
+    class DummyConfig:
+        auth_mode = "certificate"
+        state_file = tmp_path / "state.json"
+        library_names = ["WatermarkTesting"]
+        library_watermark_paths = {"watermarktesting": watermark}
+        site_hostname = "contoso.sharepoint.com"
+        site_path = "/sites/Test"
+
+    class DummyGraphClient:
+        access_identity = "Watermark - Python"
+
+        def __init__(self, _config):  # noqa: ANN001
+            pass
+
+        def resolve_site_id(self) -> str:
+            return "site-id"
+
+        def list_drives(self, _site_id: str) -> list[dict]:
+            return [{"id": "drive-id", "name": "WatermarkTesting"}]
+
+        def iter_changed_files(self, _drive_id: str, _delta_link: str | None = None):
+            return [
+                {"id": "doc-1", "name": "wrong.docx", "webUrl": "https://sp/wrong.docx"},
+                {"id": "doc-2", "name": "Target Test.DOCX", "webUrl": "https://sp/target.docx"},
+            ], "delta-1"
+
+        def download_file(self, _drive_id: str, item_id: str) -> bytes:
+            return stored_bytes.get(item_id, b"fake")
+
+        def upload_file(self, _drive_id: str, item_id: str, data: bytes) -> None:
+            uploads.append(item_id)
+            stored_bytes[item_id] = data
+
+    def fake_save_state(_path, run_started, **kwargs):  # noqa: ANN001
+        state_holder["state"] = RunState(
+            run_started,
+            frozenset(kwargs.get("processed_item_ids") or set()),
+            dict(kwargs.get("drive_delta_links") or {}),
+            dict(kwargs.get("failed_items") or {}),
+        )
+
+    monkeypatch.setattr(main_module.AppConfig, "from_env", lambda: DummyConfig())
+    monkeypatch.setattr(main_module, "GraphClient", DummyGraphClient)
+    monkeypatch.setattr(main_module, "load_state", lambda _path: state_holder["state"])
+    monkeypatch.setattr(main_module, "save_state", fake_save_state)
+    monkeypatch.setattr(main_module, "apply_watermark", lambda _s, out, _w: out.write_bytes(b"wm"))
+
+    rc = main_module.run(["--file-name", "target test.docx", "--log-level", "INFO"])
+
+    assert rc == 0
+    assert uploads == ["doc-2"]
+    assert state_holder["state"].processed_item_ids == frozenset({"doc-2"})
+
+
 def test_run_list_fields_mode_exits_without_saving_state(monkeypatch, tmp_path: Path) -> None:
     watermark = tmp_path / "wm.png"
     watermark.write_bytes(b"not-used")

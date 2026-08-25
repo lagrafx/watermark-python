@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-08-24
+
+### Added
+- New `--repair-watermarks` mode to intentionally reprocess supported files that
+  were already checkpointed in state.
+- New `--file-extension` filter for one-file-per-type production testing.
+- Tests for repair mode, file-extension filtering, Word behind-text placement,
+  PowerPoint layer ordering, and semi-transparent Excel watermark assets.
+
+### Changed
+- Word watermarks now use behind-text anchored placement instead of normal inline
+  header pictures.
+- Word repair now removes tagged watermarks and only removes legacy header
+  watermark images when they match both the prior approximate 6-inch size and
+  configured watermark PNG bytes.
+- PowerPoint watermarks are moved behind existing slide shapes.
+- PDF watermarks are drawn behind existing page content.
+- Watermark PNGs are made semi-transparent at runtime, so existing PNG assets can
+  be reused.
+
 ## 2026-08-17
 
 ### Added

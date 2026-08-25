@@ -79,6 +79,32 @@ def _build_parser() -> argparse.ArgumentParser:
             "post-upload SharePoint download. If DIR is omitted, uses ./diagnostics."
         ),
     )
+    parser.add_argument(
+        "--repair-watermarks",
+        action="store_true",
+        help=(
+            "Reprocess supported files in targeted libraries even if they were already "
+            "checkpointed in state. Use this after changing watermark placement/style."
+        ),
+    )
+    parser.add_argument(
+        "--file-extension",
+        default=None,
+        metavar="EXT",
+        help=(
+            "Only process one file extension, for example .docx or pdf. Useful with "
+            "--first-file-only when testing one file type at a time."
+        ),
+    )
+    parser.add_argument(
+        "--file-name",
+        default=None,
+        metavar="NAME",
+        help=(
+            "Only process files whose SharePoint item name exactly matches NAME. "
+            "Comparison is case-insensitive. Useful for testing one copied file."
+        ),
+    )
     return parser
 
 
@@ -387,6 +413,20 @@ def run(argv: list[str] | None = None) -> int:
         LOG.warning(
             "--first-file-only is running with --dry-run; no uploads or state updates occur."
         )
+    if args.repair_watermarks:
+        LOG.warning(
+            "repair_watermarks=enabled; supported files may be re-uploaded even if they "
+            "were already checkpointed. Use --first-file-only first in production."
+        )
+    selected_extension = None
+    if args.file_extension:
+        selected_extension = args.file_extension.lower().strip()
+        if not selected_extension.startswith("."):
+            selected_extension = f".{selected_extension}"
+        if not is_supported_extension(f"sample{selected_extension}"):
+            LOG.error("Unsupported --file-extension value: %s", args.file_extension)
+            return 2
+    selected_file_name = args.file_name.strip().lower() if args.file_name else None
 
     config = AppConfig.from_env()
     state = load_state(config.state_file)
@@ -412,6 +452,10 @@ def run(argv: list[str] | None = None) -> int:
         "Loaded failed retry items: %s",
         sum(len(items) for items in (state.failed_items or {}).values()),
     )
+    if selected_extension:
+        LOG.info("File extension filter: %s", selected_extension)
+    if selected_file_name:
+        LOG.info("File name filter: %s", args.file_name)
     if diagnostics_root:
         LOG.info("Diagnostics output: %s", diagnostics_root)
 
@@ -522,22 +566,35 @@ def run(argv: list[str] | None = None) -> int:
                 watermark_path,
             )
             try:
-                prior_delta_link = new_delta_links.get(drive_id)
-                LOG.info(
-                    "Delta mode for %s: %s",
-                    drive_name,
-                    "incremental (stored delta link found)"
-                    if prior_delta_link
-                    else "initial/full baseline (no stored delta link)",
-                )
-                items, latest_delta_link = graph.iter_changed_files(drive_id, prior_delta_link)
-                new_delta_links[drive_id] = latest_delta_link
-                LOG.info(
-                    "Graph returned %s changed file item(s) for %s; latest delta link captured=%s",
-                    len(items),
-                    drive_name,
-                    bool(latest_delta_link),
-                )
+                if args.repair_watermarks:
+                    LOG.info(
+                        "Repair mode for %s: full library scan; delta links will not advance.",
+                        drive_name,
+                    )
+                    items = graph.iter_files(drive_id)
+                    LOG.info(
+                        "Graph returned %s file item(s) for repair in %s",
+                        len(items),
+                        drive_name,
+                    )
+                else:
+                    prior_delta_link = new_delta_links.get(drive_id)
+                    LOG.info(
+                        "Delta mode for %s: %s",
+                        drive_name,
+                        "incremental (stored delta link found)"
+                        if prior_delta_link
+                        else "initial/full baseline (no stored delta link)",
+                    )
+                    items, latest_delta_link = graph.iter_changed_files(drive_id, prior_delta_link)
+                    new_delta_links[drive_id] = latest_delta_link
+                    LOG.info(
+                        "Graph returned %s changed file item(s) for %s; "
+                        "latest delta link captured=%s",
+                        len(items),
+                        drive_name,
+                        bool(latest_delta_link),
+                    )
             except GraphClientError as exc:
                 LOG.error("Failed to list files in %s: %s", drive_name, exc)
                 failed += 1
@@ -580,12 +637,30 @@ def run(argv: list[str] | None = None) -> int:
                     library_unsupported += 1
                     skipped += 1
                     continue
+                if selected_extension and Path(file_name).suffix.lower() != selected_extension:
+                    LOG.debug(
+                        "Skipping file outside --file-extension filter %s: %s",
+                        selected_extension,
+                        file_name,
+                    )
+                    skipped += 1
+                    continue
+                if selected_file_name and file_name.lower() != selected_file_name:
+                    LOG.debug(
+                        "Skipping file outside --file-name filter %s: %s",
+                        args.file_name,
+                        file_name,
+                    )
+                    skipped += 1
+                    continue
                 item_id = item.get("id")
-                if item_id and item_id in processed_item_ids:
+                if item_id and item_id in processed_item_ids and not args.repair_watermarks:
                     LOG.debug("Skipping already processed item: %s (%s)", file_name, item_id)
                     library_already_processed += 1
                     skipped += 1
                     continue
+                if item_id and item_id in processed_item_ids and args.repair_watermarks:
+                    LOG.info("Repairing already processed item: %s (%s)", file_name, item_id)
 
                 LOG.info("Processing %s", item.get("webUrl", file_name))
                 item_id = item["id"]
@@ -680,14 +755,18 @@ def run(argv: list[str] | None = None) -> int:
             "failed_retry_items=%s)",
             config.state_file,
             len(processed_item_ids),
-            0 if args.first_file_only else len(new_delta_links),
+            0 if args.first_file_only or args.repair_watermarks else len(new_delta_links),
             sum(len(items) for items in failed_items_by_drive.values()),
         )
         save_state(
             config.state_file,
             run_started,
             processed_item_ids=processed_item_ids,
-            drive_delta_links=state.drive_delta_links if args.first_file_only else new_delta_links,
+            drive_delta_links=(
+                state.drive_delta_links
+                if args.first_file_only or args.repair_watermarks
+                else new_delta_links
+            ),
             failed_items=failed_items_by_drive,
         )
         if args.first_file_only:
@@ -695,6 +774,8 @@ def run(argv: list[str] | None = None) -> int:
                 "first_file_only=delta links were not advanced, so unprocessed files remain "
                 "eligible for normal future runs."
             )
+        if args.repair_watermarks:
+            LOG.info("repair_watermarks=delta links were not advanced.")
         LOG.info(
             "State saved: %s (exists=%s, bytes=%s)",
             config.state_file,
